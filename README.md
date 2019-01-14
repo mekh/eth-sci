@@ -1,4 +1,4 @@
-## Ethereum Smart Contract Interface
+# Ethereum Smart Contract Interface
 A NodeJS library for compiling, deploying, and interacting with the smart contracts.
 It is built on top of the [web3](https://www.npmjs.com/package/web3) library.
 
@@ -10,21 +10,23 @@ From now on, you're able to call the methods as `instance.methodName(args)`. As 
 prefix before the event name - for ex. `instanse.onTransfer(callback)`
 
 Key features:
-- Extremaly easy to setup and use
-- All-in-one library, it includes methods for compilation, deployment, and working with a contract's methods and events
-- Automatic nonce calculation and tracking - no more 'await' or (semi)manual nonce calculation before each next transaction
-- gas/eth expenses tracking
+- extremaly easy to [setup][#installation] and [use][#smart-contract-interface]
+- suitable for any smart contract
+- all-in-one library, it includes methods for [compilation][#compilation-and-deployment], [deployment][#compilation-and-deployment], and [working][#basic-usage] with contract's methods and events
+- automatic nonce calculation and tracking - no more 'await' or (semi)manual nonce calculation before each next transaction
+- gas/eth [expenses tracking][#transaction-manager]
 - supports http(s), ws(s), and ipc protocols
-- supports mnemonic and a private key(s) authorization types
+- supports mnemonic and a private key(s) [authorization][#basic-usage] types
 - automatically applies a proper provider depending on the protocol type and/or authorization method (http or wss, mnemonic or private key, etc)
-- allows using custom web3-instances
+- allows using [custom web3-instances][#using-a-custom-web3-instance]
 - automatically restores WebSocket connections/subscriptions
-- contains a 'retry-on-fail' option for the send-type transactions
+- contains a ['retry-on-fail'][#retry-on-fail] option for the send-type transactions
 - with the retry option, you're able to use the same wallet in different application simultaneously, no more 'nonce too low' errors
 - it's suitable for both backend and frontend
 
-### Web3 vs Ethereum Smart Contract Interface
----
+All the examples bellow are made for a standard ERC20 token.
+
+## Web3 vs Ethereum Smart Contract Interface
 Here is an implementation of 'transfer' and 'balanceOf' methods using a native Web3 syntax and the Interface's one.
 
 The constants are the same for both implementations:
@@ -60,7 +62,7 @@ web3.eth.getAccounts().then(accounts => {
 });
 ```
 
-##### Ethereum Smart Contract Interface
+##### Smart Contract Interface
 ```javascript
 const { ERC20 } = require('eth-sci');
 
@@ -71,7 +73,7 @@ token.transfer(testWallet, 100).then(console.log);
 ```
 
 
-## Install
+## Installation
 ```bash
 $ npm install eth-sci
 ```
@@ -108,32 +110,33 @@ Events:
 - `Mint(to, amount)`
 - `Burn(burner, amount)`
 
-The constructor parameters:
----
+#### The constructor parameters:
+
 | Parameter | Type | Default | Required | Description |
 | ------ | ---- | ------- | ----------- | ----------- |
 |`nodeAddress`|string|null|true|Ethereum node URI (http://, ipc://, etc)|
 |`contractAddress`|address|null|false|contract address|
-|`authString`|string\|hex-string|null|false|12-words mnemonic or a private key|
+|`authKey`|string\|hex-string\|array of hex-strings|null|false|12-words mnemonic, a private key or an array of them|
 |`web3Instance`|Web3|null|false|a custom Web3 instance|
 |`abi`|array|ERC20|false|an ABI|
-|`bytecode`|hex-string|null|false|a bytecode|
+|`bytecode`|hex-string|null|false|"0x"-prefixed bytecode|
 
-Instance attributes:
---------------------
+#### Instance attributes:
+
 | Attribute | Default | Description |
 | ------ | ------- | ----------- |
 |w3|-|Web3 instance; can be used for direct access to the native Web3 methods and attributes|
 |gasLimit|6000000|the gasLimit, it's being used as the 'gas' parameter of send-type transactions|
+|gasUsed|undefined|the number of gas units used by the latest transaction|
 |accounts|-|the list of wallets addresses provided by truffle-hdwallet or custom web3 instance (web3.eth.getAccounts())|
 |wallet|accounts\[0\]|currently active wallet address; it is used as a 'from' parameter|
 |gasPrice|blockChain gasPrice * 1.2|the gasPrice for a particular transaction|
 |address|contract address|address of the contract|
 |abi|-|an ABI|
+|[txManager][#transaction-manager]|TransactionManager|the transaction manager class instance|
 
 
-Setters and getter:
--------------------
+#### Setters and getters
 
 **`at`** - setter; sets an address at `this.contract.options.address`
 
@@ -157,7 +160,7 @@ it will be calculated upon a transaction as gas price provided by the blockchain
    ```javascript
    console.log(token.gasPrice); // null
 
-   token.gasPrice = 4.567;
+   token.gasPrice = 4.567;      // value in gWei
    console.log(token.gasPrice); // 4567000000
    ```
 
@@ -167,6 +170,7 @@ it will be calculated upon a transaction as gas price provided by the blockchain
     const token = new ERC20(nodeAddress, contractAddress, mnemonic);
     token.addAdmin('0xAbc...'); // TypeError: token.addAdmin is not a function
 
+    // a new function defenition
     const addAdmin = {
         "constant": false,
         "inputs": [{ "name": "_newAdminAddress", "type": "address" }],
@@ -177,8 +181,10 @@ it will be calculated upon a transaction as gas price provided by the blockchain
         "type": "function"
     };
 
+    // adding new function to the ABI
     token.abi = [...token.abi, addAdmin];
 
+    // calling the method
     token.addAdmin('0xAbc...', (err, res) => {
         if(err) console.log(err);
         else console.log('Success')
@@ -186,7 +192,7 @@ it will be calculated upon a transaction as gas price provided by the blockchain
    ```
 
 ### Compilation and deployment
----
+
 For example, we're about to deploy this contract:
 ```
 contract ERC20Token {
@@ -246,15 +252,20 @@ const source = fs.readFileSync('./contract.sol', 'utf-8');
 const mnemonic = "12 words mnemonic...";
 const nodeAddress = 'https://mainnet.infura.io/v3/<API_KEY>';
 
-const contractArguments = ["ERC20 Token", "TKN", 18, "100000000000000000000"];
+// Smart Contract arguments should be passed as an array
+const contractArguments = ["Token Name", "TKN", 18, "100000000000000000000"];
 
+// Compilation
 const compile = async (souseCode) => {
     const compiled =  await utils.compile(souseCode);
     return compiled.Token;
 };
 
+// The 'compile' function returns an object with two key-value pairs: { abi: [], bytecode: "0x..." }
 const deploy = async ({ abi, bytecode }) => {
     const contract = new Interface(nodeAddress, null, mnemonic, null, abi, bytecode);
+
+    // Smart contract arguments is passed as an object { args: [] }
     await contract.deploy({args: contractArguments});
     return contract;
 };
@@ -287,7 +298,7 @@ Once the contract is deployed, the contract instance gets the address automatica
 
 
 ### Basic usage
----
+
 ```javascript
 const { ERC20 } = require('eth-sci');
 
@@ -333,7 +344,7 @@ const transfer = async (callback) => {
 transfer((err, res) => console.log(`${err ? 'Fail' : 'Success'}`));
 ```
 
-#### Customize web3 parameters
+### Customize web3 parameters
 It is possible to replace any parameter used by the underlying web3 provider - i.e. nonce, data, gasPrice, gas, from, and value.
 Just pass an object with key-value pairs as the last argument (if there is no callback), or right before the callback:
 
@@ -363,8 +374,8 @@ See the [sendTransaction](https://web3js.readthedocs.io/en/1.0/web3-eth.html#sen
 and
 [methods.myMethod.call](https://web3js.readthedocs.io/en/1.0/web3-eth-contract.html#methods-mymethod-call) methods description.
 
-#### Using a custom web3 instance
----
+### Using a custom web3 instance
+
 There is a static method - `web3`. It accepts:
 - web3-instance (required)
 - contract address (optionally)
@@ -383,21 +394,231 @@ const web3 = new Web3(ganache.provider());
 const token = Interface.web3(web3, null, abi, bytecode);
 ```
 
-#### Listening for realtime events
+### Runtime events
+There are three types of events are being emitted upon sending a transaction:
+- transactionHash
+- receipt
+- error
+
+```javascript
+contract.myMethod(methodArguments)
+    .on('transactionHash', h => console.log(`TxHash: ${h}`)
+    .on('receipt', r => console.log(`Receipt: ${r}`)
+    .on('error', e => console.log(`Erorr: ${r}`)
+    .then(() => console.log('Done')
+    .catch(() => console.log('Fail');
+```
+
+[More info](https://web3js.readthedocs.io/en/1.0/web3-eth-contract.html#methods-mymethod-send)
+
+### Listening for realtime events
+For any event that defined in a smart contract, add an 'on'-prefix before the event name and pass optional parameters and a callback.
+For example, there is a smart contract that contains:
+```
+event MyEvent(address indexed _addr, uint _value);
+
+function myFunc(address _addr, uint _value) public returns(bool) {
+    ...
+    emit MyEvent(_addr, _value);
+    ...
+}
+```
+
+Subscribe to 'MyEvent':
+```javascript
+contract.onMyEvent({}, callback);
+```
+
+[More info](https://web3js.readthedocs.io/en/1.0/web3-eth-contract.html#contract-events)
+
+### Retry-on-fail
+For any send-type transaction, it is possible to define a 'retryOptions' object with the following parameters:
+- `retry` - `Number`: Integer, the maximum number of retries. **Default value:** 3
+- `gasPrice` - `String`: the initial value of the gasPrice in Wei. **Default value:** [web3.eth.getGasPrice()](https://web3js.readthedocs.io/en/1.0/web3-eth.html#getgasprice) * 1.2
+- `delay` - `Number`: the delay in seconds before each next attempt. **Default value:** 10
+- `verify` - `Function`: a function that will be executed before each next retry. **Default value:** null
+- `incBase` - `Number`: the base of the exponential expression that defines the gasPrice on each next retry. **Default value:** 1.3
+
+The `verify` function (if defined) will get all the arguments that were passed to the original contract's method.
+
+By default, the `gasPrice` will be increased on each next iteration as `gasPrice = gasPriceBase * incBase ** count`
+
+If the initial `gasPrice` is 3gWei, and the `incBase` has a default value (1.3), the gasPrice will be changed as
+
+|retry #|equation|gasPrice|
+|---|---|---|
+|0|3 * 1.3^0|3|
+|1|3 * 1.3^1|3.9|
+|2|3 * 1.3^2|5.07|
+|3|3 * 1.3^3|6.591|
+|4|3 * 1.3^4|8.5683|
+
+In order to keep the gasPrice invariable, set the `incBase` to 1.
+
+#### Example
+A contract:
+```solidity
+...
+    mapping (address => bool) public users;
+
+    function addUser(address _user) public {
+        require(!users[_user]);
+        users[_user] = true;
+    }
+
+    function isUser(address _user) public {
+        return users[_user];
+    }
+...
+```
+In the example above, an address can be set as 'user' only once. Every subsequent attempt will fail.
+By default, web3 has a timeout - the transaction will be rejected by web3 if it hasn't been mined in 750 seconds.
+But, as a matter of fact, the timeout doesn't mean that the transaction has not been mined - timeout could be caused by network latency, bugs, etc.
+In this case, if the `retryOptions` is defined with no `verify` function, the library will be trying to send the transaction until the maximum number of retries is reached.
+In order to eliminate such behavior, define the `verify` function as follows:
+```javascript
+const options = {
+    verify: async user => await contract.isUser(user)
+}
+
+contract.addUser('0xABC...', { retryOptions: options });
+```
+
+Once the very first transaction is failed and the `delay` period has expired, the code will call the `verify` function and:
+- will return the result if `verify` returned true;
+- resend a transaction otherwise
+
+### Transaction manager
+The transaction manager tracks nonces, keeps the transaction history, total and per-transaction gas and eth expenses, defines the transaction types, sends transactions to the blockchain, etc.
+It can be accessed via `txManager` property of the Interface instance.
+
+Useful methods and attributes:
+- `getTxStat()` - returns an object with key-value pairs:
+    - submitted - the number of transactions that were sent to the blockchain but haven't been mined yet
+    - pending - pending - the number of transactions that have been passed to the txManager but haven't been sent to the blockchain
+    - failed - the number of failed transactions
+    - confirmed - the number of confirmed transaction (i.e. mined ones)
+    - retries - the total number of retries attempted for failed transactions
+    - totalGasUsed - the total number of 'gas' units spent
+    - totalEthSpent - the total amount of ETH spent
+- `totalGasUsed` - see above
+- `totalEthSpent` - see above
+
+The `totalEthSpent` is increased after every transaction: `totalEthSpent` += `gasPrice` * `gasUsed`.
+
+`gaUsed` is an Interface instance property; it indicates the number of gas units that have been used by a particular transaction.
+
+```javascript
+token.gasPrice = 10;  // set a higher gasPrice to get the transaction mined faster
+const testWallet = '0xABC...';
+
+const test = async () => {
+    const promises = [];
+
+    await token.transfer(testWallet, 100);
+    // print the number of gas that was used by the transaction above
+    console.log(token.gasUsed);
+
+    console.log(JSON.stringify(token.txManager.getTxStat()));
+
+
+    // send 5 transaction in one batch, all of them will be (most probably) mined within a single block
+    for(let i=0; i<5; i++) {
+        promises.push(new Promise(async (resolve, reject) => {
+            await token.transfer(testWallet, 100);
+            console.log(JSON.stringify(token.txManager.getTxStat()));
+            resolve();
+        }));
+    }
+
+    await Promise.all(promises)
+};
+
+test();
+```
+The output:
+```javascript
+37186
+{"submitted":0,"pending":0,"failed":0,"confirmed":1,"retries":0,"totalGasUsed":"37186","totalEthSpent":"0.00037186"}
+{"submitted":4,"pending":0,"failed":0,"confirmed":2,"retries":0,"totalGasUsed":"74372","totalEthSpent":"0.00074372"}
+{"submitted":3,"pending":0,"failed":0,"confirmed":3,"retries":0,"totalGasUsed":"111558","totalEthSpent":"0.0011155800000000001"}
+{"submitted":2,"pending":0,"failed":0,"confirmed":4,"retries":0,"totalGasUsed":"148744","totalEthSpent":"0.00148744"}
+{"submitted":1,"pending":0,"failed":0,"confirmed":5,"retries":0,"totalGasUsed":"185930","totalEthSpent":"0.0018593"}
+{"submitted":0,"pending":0,"failed":0,"confirmed":6,"retries":0,"totalGasUsed":"223116","totalEthSpent":"0.00223116"}
+```
+
+There are the methods for retrieving individual items of the stat. All of them accept an optional argument -
+an address of wallet the transactions have been sent from:
+- getFailedTransactions(\[address\])
+- getConfirmedTransactions(\[address\])
+- getPendingTransactions(\[address\])
+- getSubmittedTransactions(\[address\])
+
+```javascript
+token.gasPrice = 10;
+
+const getStat = address => token.txManager.getConfirmedTransactions(address).length;
+
+const test = async () => {
+    await token.transfer(testWallet, 100);
+    console.log(token.wallet, getStat(token.wallet));
+
+    token.wallet = 1;
+    await token.transfer(testWallet, 100);
+    console.log(token.wallet, getStat(token.wallet));
+    console.log('Total: ', getStat())
+};
+
+test();
+```
+
+The output:
+```
+0xc9E6D574... 1
+0xa9C5Eb93... 1
+Total: 2
+```
+
+### Logging
 TODO
 
-#### Retry on fail
-TODO
+### Accessing the underlying Web3 instance
 
-#### Transaction manager
-TODO
+All the methods/attribute that is being provided by the Web3 library are accessible through the 'w3' attribute.
 
-#### Logging
-TODO
+```javascript
+const { Interface } = require('eth-sci');
+...
+const contract = new Interface(nodeAddress, contractAddress, mnemonic);
+
+const web3 = contract.w3;
+
+// get a transaction receipt
+contract.w3.eth.getTransactionReceipt("0x...").then(...);
+
+// get a nonce at block 7063638
+contract.w3.eth.getTransactionCount("0xABC...", 7063638).then(...);
+
+//get gasPrice
+contract.w3.eth.getGasPrice().then(...);
+
+// send 1 ETH
+contract.w3.eth.sendTransaction({
+    from: contract.accounts[0],
+    to: "0xABC...",
+    value: contract.w3.utils.toWei(1, 'ether');
+});
+
+// accessing events - we3.eth.Contract().events are binded to this.events;
+contract.events.MyEvent([options][, callback])
+
+```
+See the [official web3.js documentation](https://web3js.readthedocs.io/en/1.0/index.html)
 
 ## Limitations
-- the library does not support 'HTTP Basic Authentication' for the web3 lib. Fell free to contact me or make a pool request;
-- TypeScript types - I'm not familiar (yet) with the TypeScript, so I made it only in autocompletion purposes for my IDE;
+- the library does not support 'HTTP Basic Authentication' for the web3 lib. Fell free to contact me or make a pool request.
+As a workaround, you may create a native Web3 class instance and pass it to the library constructor. [More info][#using-a-custom-web3-instance]
+
 
 ## Troubleshooting
 ##### Transactions are too slow
@@ -409,6 +630,7 @@ const token = new ERC20(...);
 token.gasPrice = 3; // in gWei
 ...
 ```
+
 ##### Error: Exceeds block gas limit
 Decrease the gasLimit:
 ```javascript
@@ -426,7 +648,7 @@ $ npm install ethereumjs-wallet@0.6.0
 ```
 
 #### The compiler fails with 'Source file requires different compiler version' error
-First of all, stay on top of things and don't use obsolete technologies, so consider to align your project in accordance with the most recent requirements.
+First of all, stay on top of things and don't use obsolete technologies, consider to align your project in accordance with the most recent requirements.
 
 The 'compile' module uses 'solc' version 0.5.x. If your pragma parameter is set to something like '^0.4.23', plese try to change it to '>=0.4.23'.
 

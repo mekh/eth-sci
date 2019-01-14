@@ -35,11 +35,11 @@ declare interface TokenInfo {
 }
 
 export declare class Web3 {
-    constructor(nodeAddress: string, mnemonic: string | string[])
+    constructor(nodeAddress: string, authKey: string | string[])
 }
 
 declare class Interface {
-    constructor(nodeAddress: string, contractAddress?: string, mnemonic?: string | string[], web3Instance?: new () => Web3js.default, abi?: ABIDefinition, bytecode?: string);
+    constructor(nodeAddress: string, contractAddress?: string, authKey?: string | string[], web3Instance?: new () => Web3js.default, abi?: ABIDefinition, bytecode?: string);
     wallet: string | number;
     gasPrice: number;
     init(): void;
@@ -47,7 +47,7 @@ declare class Interface {
 }
 
 export declare class ERC20 extends Interface {
-    constructor(nodeAddress: string, contractAddress?: string, mnemonic?: string | string[], web3Instance?: new () => Web3js.default, abi?: ABIDefinition, bytecode?: string);
+    constructor(nodeAddress: string, contractAddress?: string, authKey?: string | string[], web3Instance?: new () => Web3js.default, abi?: ABIDefinition, bytecode?: string);
     static web3(web3Instance: new () => Web3js.default, contractAddress: string, abi: ABIDefinition, bytecode?: string): ERC20;
 
     info: {

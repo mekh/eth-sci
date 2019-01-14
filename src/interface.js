@@ -749,7 +749,6 @@ class Interface {
         return Math.ceil(gasPrice * multiplier);
     }
 
-
     async deploy(args, callback) {
         args = args || {};
         const bytecode = args.bytecode || this.bytecode;
@@ -821,7 +820,7 @@ class Interface {
         let gasPrice = retryOptions.gasPrice || this.gasPrice || await this.getGasPrice(1.2); //block gasPrice + 20%
         const verify = retryOptions.verify;
         const retry = retryOptions.retry || 3;
-        const multiplier = retryOptions.multiplier || 1.3;
+        const incBase = retryOptions.incBase || 1.3;
 
         let counter = 0;
 
@@ -852,7 +851,7 @@ class Interface {
             }
 
             // first attempt - send a transaction with a standard price, increase it on subsequent attempts
-            txMeta.options.gasPrice = Math.ceil(parseInt(gasPrice) * multiplier ** counter);
+            txMeta.options.gasPrice = Math.ceil(parseInt(gasPrice) * incBase ** counter);
             txMeta.options.nonce = nonce;
 
             [err, result] = await this.txManager.submitTx(this, txMeta, defer);
