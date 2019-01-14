@@ -10,17 +10,17 @@ From now on, you're able to call the methods as `instance.methodName(args)`. As 
 prefix before the event name - for ex. `instanse.onTransfer(callback)`
 
 Key features:
-- extremaly easy to [setup][#installation] and [use][#smart-contract-interface]
+- extremaly easy to [setup](#installation) and [use](#smart-contract-interface)
 - suitable for any smart contract
-- all-in-one library, it includes methods for [compilation][#compilation-and-deployment], [deployment][#compilation-and-deployment], and [working][#basic-usage] with contract's methods and events
+- all-in-one library, it includes methods for [compilation](#compilation-and-deployment), [deployment](#compilation-and-deployment), and [working](#basic-usage) with contract's methods and events
 - automatic nonce calculation and tracking - no more 'await' or (semi)manual nonce calculation before each next transaction
-- gas/eth [expenses tracking][#transaction-manager]
+- gas/eth [expenses tracking](#transaction-manager)
 - supports http(s), ws(s), and ipc protocols
-- supports mnemonic and a private key(s) [authorization][#basic-usage] types
+- supports mnemonic and a private key(s) [authorization](#basic-usage) types
 - automatically applies a proper provider depending on the protocol type and/or authorization method (http or wss, mnemonic or private key, etc)
-- allows using [custom web3-instances][#using-a-custom-web3-instance]
+- allows using [custom web3-instances](#using-a-custom-web3-instance)
 - automatically restores WebSocket connections/subscriptions
-- contains a ['retry-on-fail'][#retry-on-fail] option for the send-type transactions
+- contains a ['retry-on-fail'](#retry-on-fail) option for the send-type transactions
 - with the retry option, you're able to use the same wallet in different application simultaneously, no more 'nonce too low' errors
 - it's suitable for both backend and frontend
 
@@ -133,7 +133,7 @@ Events:
 |gasPrice|blockChain gasPrice * 1.2|the gasPrice for a particular transaction|
 |address|contract address|address of the contract|
 |abi|-|an ABI|
-|[txManager][#transaction-manager]|TransactionManager|the transaction manager class instance|
+|[txManager](#transaction-manager)|TransactionManager|the transaction manager class instance|
 
 
 #### Setters and getters
@@ -617,7 +617,7 @@ See the [official web3.js documentation](https://web3js.readthedocs.io/en/1.0/in
 
 ## Limitations
 - the library does not support 'HTTP Basic Authentication' for the web3 lib. Fell free to contact me or make a pool request.
-As a workaround, you may create a native Web3 class instance and pass it to the library constructor. [More info][#using-a-custom-web3-instance]
+As a workaround, you may create a native Web3 class instance and pass it to the library constructor. [More info](#using-a-custom-web3-instance)
 
 
 ## Troubleshooting
