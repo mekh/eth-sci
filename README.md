@@ -2,21 +2,65 @@
 A NodeJS library for compiling, deploying, and interacting with the smart contracts.
 It is built on top of the [web3](https://www.npmjs.com/package/web3) library.
 
-The sole purpose of this library is to simplify a backend/dAapp development process, as a result, to save tons of time.
+The sole purpose of this project is to simplify a backend/dAapp development process, as a result, to save tons of time.
 
 In particular, once ABI is passed to the Interface constructor, it automatically determines all the methods and their types,
 as well as the events listed within the ABI.
-From now on, you're able to call the methods as `instance.methodName(args)`. As for the events, just add 'on'
-prefix before the event name - for ex. `instanse.onTransfer(callback)`
+From now on, you're able to call the methods as `instance.methodName(methodArgs)`. As for the events, just add 'on'
+prefix before the event name - for example: `instance.onTransfer(callback)`
 
-Key features:
-- extremaly easy to [setup](#installation) and [use](#smart-contract-interface)
-- suitable for any smart contract
-- all-in-one library, it includes methods for [compilation](#compilation-and-deployment), [deployment](#compilation-and-deployment), and [working](#basic-usage) with contract's methods and events
-- automatic nonce calculation and tracking - no more 'await' or (semi)manual nonce calculation before each next transaction
-- gas/eth [expenses tracking](#transaction-manager)
+Table of content:
+- [Features](#features)
+- [Installation](#installation)
+- [Quick start](#quick-start)
+    - [Unsigned transactions](#unsigned-transactions)
+    - [Signed transactions](#signed-transactions)
+- [Web3 vs Ethereum Smart Contract Interface](#web3-vs-ethereum-smart-contract-interface)
+    - [Web3](#web3)
+    - [Smart Contract Interface](#smart-contract-interface)
+- [Usage](#usage)
+    - [The constructor parameters](#the-constructor-parameters)
+    - [Instance attributes](#instance-attributes)
+    - [Setters and getters](#setters-and-getters)
+    - [Compilation and deployment](#compilation-and-deployment)
+        - [Compiler Parameters](#compiler-parameters)
+        - [Deployment](#deploy)
+        - [Compilation and deployment example](#compilation-and-deployment-example)
+            - [Passing arguments to the contract](#passing-arguments-to-the-contract)
+            - [Deploying the contract](#deploying)
+    - [Customize web3 parameters](#customize-web3-parameters)
+    - [Using a custom web3 instance](#using-a-custom-web3-instance)
+    - [Runtime events](#runtime-events)
+    - [Listening for realtime events](#listening-for-realtime-events)
+    - [Retry on fail](#retry-on-fail)
+        - [Options](#options)
+        - [Gas price calculation](#gas-price-calculation)
+        - [Example](#example)
+    - [Transaction manager](#transaction-manager)
+        - [Nonce calculation](#nonce-calculation)
+        - [Transaction queue](#transaction-queue)
+        - [Methods and attributes](#methods-and-attributes)
+        - [Expenses tracking](#expenses-tracking)
+        - [Examples](#examples)
+    - [Logging](#logging)
+    - [Accessing the underlying Web3 instance](#accessing-the-underlying-web3-instance)
+- [Limitations](#limitations)
+- [Troubleshooting](#troubleshooting)
+    - [Transactions are too slow](#transactions-are-too-slow)
+    - [Error: Exceeds block gas limit](#error-exceeds-block-gas-limit)
+    - [Error: Cannot find module 'ethereumjs-wallet/hdkey'](#)
+    - [The compiler fails with 'Source file requires different compiler version' error](#)
+- [License](#license)
+
+
+## Features
+- extremaly easy to [setup](#installation) and [use](#quick-start)
+- suitable for **any smart contract**
+- all-in-one library, it includes methods for [compilation](#compilation), [deployment](#deployment), and [working](#usage) with contract's methods and events
+- automatic [nonce calculation](#nonce-calculation) and tracking - no more 'await' or nonce calculation routines before each next transaction
+- gas/eth [expenses tracking](#expenses-tracking)
 - supports http(s), ws(s), and ipc protocols
-- supports mnemonic and a private key(s) [authorization](#basic-usage) types
+- supports mnemonic and a private key(s) [authorization](#signed-transactions) types
 - automatically applies a proper provider depending on the protocol type and/or authorization method (http or wss, mnemonic or private key, etc)
 - allows using [custom web3-instances](#using-a-custom-web3-instance)
 - automatically restores WebSocket connections/subscriptions
@@ -24,7 +68,65 @@ Key features:
 - with the retry option, you're able to use the same wallet in different application simultaneously, no more 'nonce too low' errors
 - it's suitable for both backend and frontend
 
-All the examples bellow are made for a standard ERC20 token.
+## Installation
+```bash
+$ npm install --save eth-sci
+```
+
+## Quick start
+### Unsigned transactions
+```javascript
+const { ERC20 } = require('eth-sci');
+
+const token = new ERC20(
+    'https://mainnet.infura.io/v3/<API_KEY>',
+    '0x45F1F44dE1...'
+);
+
+// Resolve a promise
+token.totalSupply().then(console.log);
+token.name().then(console.log);
+
+// Callback
+token.symbol((err, res) => console.log(err, res));
+
+// async-await
+const checkBalance = async address => {
+    return await token.balanceOf(address);
+};
+
+checkBalance('0x4b32C...').then(console.log);
+```
+
+### Signed transactions
+In order to be able to alter the contract state, you have to pass either a mnemonic or a private key (an array of keys) to the constructor:
+```javascript
+const { ERC20 } = require('eth-sci');
+const mnemonic = '12 words mnemonic';
+
+// 0x-prefix is allowed as well
+const privateKey = '16ac46b....'; // 32-bytes private key;
+
+// an array of private keys - both plain and '0x'-prefixed keys are allowed
+const keysArray = [
+    '0xAbc...', // 0x-prefix
+    'Bcd...',   // no prefix
+    '0xCde'     // 0x-prefix
+]
+
+const token = new ERC20(
+    'https://mainnet.infura.io/v3/<API_KEY>',
+    '0x45F1F44dE1...',
+    mnemonic // or `privateKey`, or `keysArray`
+);
+
+const transfer = async (callback) => {
+    const balance = await token.balanceOf(token.wallet);
+    return await token.transfer('0x91a5...', balance);
+};
+
+transfer((err, res) => console.log(`${err ? 'Fail' : 'Success'}`));
+```
 
 ## Web3 vs Ethereum Smart Contract Interface
 Here is an implementation of 'transfer' and 'balanceOf' methods using a native Web3 syntax and the Interface's one.
@@ -37,7 +139,7 @@ const testWallet = '0x47573c6661...';
 const mnemonic = "12 words mnemonic";
 ```
 
-##### Web3
+### Web3
 ```javascript
 const Web3 = require('web3');
 const HDWalletProvider = require('truffle-hdwallet-provider');
@@ -62,7 +164,7 @@ web3.eth.getAccounts().then(accounts => {
 });
 ```
 
-##### Smart Contract Interface
+### Smart Contract Interface
 ```javascript
 const { ERC20 } = require('eth-sci');
 
@@ -72,13 +174,7 @@ token.balanceOf(testWallet).then(console.log);
 token.transfer(testWallet, 100).then(console.log);
 ```
 
-
-## Installation
-```bash
-$ npm install eth-sci
-```
-
-## USAGE
+## Usage
 Following modules are being exported by the library:
 
 - Interface - general-purpose class. Use it as the parent class for your subclasses
@@ -110,7 +206,7 @@ Events:
 - `Mint(to, amount)`
 - `Burn(burner, amount)`
 
-#### The constructor parameters:
+### The constructor parameters:
 
 | Parameter | Type | Default | Required | Description |
 | ------ | ---- | ------- | ----------- | ----------- |
@@ -121,22 +217,22 @@ Events:
 |`abi`|array|ERC20|false|an ABI|
 |`bytecode`|hex-string|null|false|"0x"-prefixed bytecode|
 
-#### Instance attributes:
+### Instance attributes:
 
 | Attribute | Default | Description |
 | ------ | ------- | ----------- |
-|w3|-|Web3 instance; can be used for direct access to the native Web3 methods and attributes|
-|gasLimit|6000000|the gasLimit, it's being used as the 'gas' parameter of send-type transactions|
-|gasUsed|undefined|the number of gas units used by the latest transaction|
-|accounts|-|the list of wallets addresses provided by truffle-hdwallet or custom web3 instance (web3.eth.getAccounts())|
-|wallet|accounts\[0\]|currently active wallet address; it is used as a 'from' parameter|
-|gasPrice|blockChain gasPrice * 1.2|the gasPrice for a particular transaction|
-|address|contract address|address of the contract|
-|abi|-|an ABI|
-|[txManager](#transaction-manager)|TransactionManager|the transaction manager class instance|
+|`w3`|-|Web3 instance; can be used for direct access to the native Web3 methods and attributes|
+|`gasLimit`|6000000|the gasLimit, it's being used as the 'gas' parameter of send-type transactions|
+|`gasUsed`|undefined|the number of gas units used by the latest transaction|
+|`accounts`|-|the list of wallets addresses provided by truffle-hdwallet or custom web3 instance (web3.eth.getAccounts())|
+|`wallet`|accounts\[0\]|currently active wallet address; it is used as a 'from' parameter|
+|`gasPrice`|blockChain gasPrice * 1.2|the gasPrice for a particular transaction|
+|`address`|-|address of the contract|
+|`abi`|-|contract's ABI|
+|[`txManager`](#transaction-manager)|TransactionManager|the transaction manager class instance|
 
 
-#### Setters and getters
+### Setters and getters
 
 **`at`** - setter; sets an address at `this.contract.options.address`
 
@@ -192,7 +288,50 @@ it will be calculated upon a transaction as gas price provided by the blockchain
    ```
 
 ### Compilation and deployment
+The compiler is an async function exported by the `utils` module while the `deploy` is the
+method provided by the Interface class.
 
+##### Compiler Parameters
+The compiler requires two arguments:
+- the source code (required)
+- callback (optional)
+
+```javascript
+const fs = require('fs');
+const { utils } = require('eth-sci');
+
+const sourceCode = fs.readFileSync('./contract.sol', 'utf-8');
+utils.compile(sourceCode[, callback]);
+```
+
+##### Returns
+The compiler returns an object with the following structure:
+```
+{
+    Contract1 : { abi: [...], bytecode: "0x..." },
+    Contract2 : { abi: [...], bytecode: "0x..." },
+    ...
+    ContractN : { abi: [...], bytecode: "0x..." }
+}
+```
+
+#### Deploy
+The `deploy` method accepts an optional object and optional callback function.
+```javascript
+contract.deploy([options][, callback]);
+```
+
+#### Parameters
+- `options` (`Object`, optional):
+    - `args` (`Array`, optional): arguments to be passed to the smart contract constructor
+    - `nonce` (`Number`, optional): nonce to use for the transaction
+    - `from` (`String`, optional): an address the transaction will be sent from
+    - `gasPrice` (`Number`, optional): the gas price in wei to use for transactions
+- `callback` (`Function`, optional): will be fired with the result of the deployment - an instance of the Interface class
+as the second argument or an error object as the first one
+
+#### Compilation and deployment example
+---
 For example, we're about to deploy this contract:
 ```
 contract ERC20Token {
@@ -234,15 +373,23 @@ contract Token is Ownable {
 
 ```
 
-The compiler returns an object with the following structure:
-```
-{
-    ERC20Token : { abi: [...], bytecode: "0x..." },
-    Ownable : { abi: [...], bytecode: "0x..." },
-    Token : { abi: [...], bytecode: "0x..." }
-}
+##### Passing arguments to the contract
+In the [example above](#contract-source-code), the Token contract constructor requires 4 positional arguments:
+- name
+- symbol
+- decimals
+- totalSupply
+
+Those parameters should be passed as `args` key of the `options` object
+```javascript
+const contractArguments = [name, symbol, decimals, totalSupply];
+const options = {args: contractArguments};
+...
+contract.deploy(options);
+
 ```
 
+##### Deploying
 In order to compile and deploy the 'Token' contract:
 ```javascript
 const fs = require('fs');
@@ -254,10 +401,11 @@ const nodeAddress = 'https://mainnet.infura.io/v3/<API_KEY>';
 
 // Smart Contract arguments should be passed as an array
 const contractArguments = ["Token Name", "TKN", 18, "100000000000000000000"];
+const options = {args: contractArguments};
 
 // Compilation
-const compile = async (souseCode) => {
-    const compiled =  await utils.compile(souseCode);
+const compile = async (sourceCode) => {
+    const compiled =  await utils.compile(sourceCode);
     return compiled.Token;
 };
 
@@ -265,8 +413,8 @@ const compile = async (souseCode) => {
 const deploy = async ({ abi, bytecode }) => {
     const contract = new Interface(nodeAddress, null, mnemonic, null, abi, bytecode);
 
-    // Smart contract arguments is passed as an object { args: [] }
-    await contract.deploy({args: contractArguments});
+    // Smart contract arguments are included to the 'options' object as { args: [] }
+    await contract.deploy(options);
     return contract;
 };
 
@@ -296,56 +444,8 @@ compile(source)
 
 Once the contract is deployed, the contract instance gets the address automatically, so it's completely ready to work.
 
-
-### Basic usage
-
-```javascript
-const { ERC20 } = require('eth-sci');
-
-const token = new ERC20(
-    'https://mainnet.infura.io/v3/<API_KEY>',
-    '0x45F1F44dE1...'
-);
-
-// Resolve a promise
-token.totalSupply().then(console.log);
-token.name().then(console.log);
-
-// Callback
-token.symbol((err, res) => console.log(err, res));
-
-// async-await
-const checkBalance = async address => {
-    return await token.balanceOf(address);
-};
-
-checkBalance('0x4b32C...').then(console.log);
-```
-
-In order to be able to transfer the tokens, you have to pass either a mnemonic or a private key (an array of keys) to the constructor:
-```javascript
-const { ERC20 } = require('eth-sci');
-const mnemonic = '12 words mnemonic';
-
-// 0x-prefix is allowed as well
-const privateKey = '16ac46b....'; // 32-bytes private key;
-
-const token = new ERC20(
-    'https://mainnet.infura.io/v3/<API_KEY>',
-    '0x45F1F44dE1...',
-    mnemonic // or privateKey
-);
-
-const transfer = async (callback) => {
-    const balance = await token.balanceOf(token.wallet);
-    return await token.transfer('0x91a5...', balance);
-};
-
-transfer((err, res) => console.log(`${err ? 'Fail' : 'Success'}`));
-```
-
 ### Customize web3 parameters
-It is possible to replace any parameter used by the underlying web3 provider - i.e. nonce, data, gasPrice, gas, from, and value.
+It is possible to replace any parameter used by the underlying web3 provider - i.e. `nonce`, `data`, `gasPrice`, `gas`, `from`, and `value`.
 Just pass an object with key-value pairs as the last argument (if there is no callback), or right before the callback:
 
 ```javascript
@@ -353,15 +453,20 @@ const params = {
     from: token.accounts[1],  // sender's address
     gas: '40000',             // gas limit
     gasPrice: '5200000000'    // gas price in Wei
+    nonce: 101                // set nonce
 };
 
 token.tokenMethod('0xAbc', 100, params).then(...);
 
 // using a callback
-token.tokenMethod('0xAbc', 100, params, (err, res) => {...});
+token.tokenMethod('0xAbc', 100, params, (err, res) => {
+    // your code here
+});
 
 // call-type methods work the same
-token.someRestrictedMethod({from: token.accounts[2]}).then(...);
+token.someRestrictedMethod({from: token.accounts[2]}).then(r => {
+    // your code here
+});
 ```
 
 The last line of the example above is equal to:
@@ -412,7 +517,11 @@ contract.myMethod(methodArguments)
 [More info](https://web3js.readthedocs.io/en/1.0/web3-eth-contract.html#methods-mymethod-send)
 
 ### Listening for realtime events
-For any event that defined in a smart contract, add an 'on'-prefix before the event name and pass optional parameters and a callback.
+There are two mandatory requirements:
+- the instance must be initialized with 'ws' or 'wss' address
+- the callback is strictly required
+
+For any event that defined in ABI of the smart contract, add an 'on'-prefix before the event name and pass optional parameters and a callback.
 For example, there is a smart contract that contains:
 ```
 event MyEvent(address indexed _addr, uint _value);
@@ -426,24 +535,29 @@ function myFunc(address _addr, uint _value) public returns(bool) {
 
 Subscribe to 'MyEvent':
 ```javascript
-contract.onMyEvent({}, callback);
+const contract = new Interface('wss://mainnet.infura.io/ws/v3/<API_KEY>', '0xAbC...');
+contract.onMyEvent({}, (err, res) => { });
 ```
+
+The `callback` is called each time the `MyEvent` is fired;
 
 [More info](https://web3js.readthedocs.io/en/1.0/web3-eth-contract.html#contract-events)
 
 ### Retry-on-fail
+#### Options
 For any send-type transaction, it is possible to define a 'retryOptions' object with the following parameters:
-- `retry` - `Number`: Integer, the maximum number of retries. **Default value:** 3
-- `gasPrice` - `String`: the initial value of the gasPrice in Wei. **Default value:** [web3.eth.getGasPrice()](https://web3js.readthedocs.io/en/1.0/web3-eth.html#getgasprice) * 1.2
-- `delay` - `Number`: the delay in seconds before each next attempt. **Default value:** 10
-- `verify` - `Function`: a function that will be executed before each next retry. **Default value:** null
-- `incBase` - `Number`: the base of the exponential expression that defines the gasPrice on each next retry. **Default value:** 1.3
+- `retry` (`Number`, optional): Integer, the maximum number of retries. **Default value:** 3
+- `gasPrice` (`String`, optional): the initial value of the gasPrice in Wei. **Default value:** [web3.eth.getGasPrice()](https://web3js.readthedocs.io/en/1.0/web3-eth.html#getgasprice) * 1.2
+- `delay` (`Number`, optional): the delay in seconds before each next attempt. **Default value:** 10
+- `verify` (`Function`, optional): a function that will be executed before each next retry. **Default value:** null
+- `incBase` (`Number`, optional): the base of the exponential expression that defines the gasPrice on each next retry. **Default value:** 1
 
 The `verify` function (if defined) will get all the arguments that were passed to the original contract's method.
 
-By default, the `gasPrice` will be increased on each next iteration as `gasPrice = gasPriceBase * incBase ** count`
+In the `incBase` > 1, the `gasPrice` will be increased on each next iteration as `gasPrice = gasPriceBase * incBase ** count`
 
-If the initial `gasPrice` is 3gWei, and the `incBase` has a default value (1.3), the gasPrice will be changed as
+#### Gas price calculation
+If the initial `gasPrice` is **3gWei**, and the `incBase` has a value **1.3**, the gasPrice will be changed as
 
 |retry #|equation|gasPrice|
 |---|---|---|
@@ -486,28 +600,39 @@ contract.addUser('0xABC...', { retryOptions: options });
 
 Once the very first transaction is failed and the `delay` period has expired, the code will call the `verify` function and:
 - will return the result if `verify` returned true;
-- resend a transaction otherwise
+- will resend a transaction otherwise
 
 ### Transaction manager
 The transaction manager tracks nonces, keeps the transaction history, total and per-transaction gas and eth expenses, defines the transaction types, sends transactions to the blockchain, etc.
 It can be accessed via `txManager` property of the Interface instance.
 
-Useful methods and attributes:
+#### Nonce calculation
+The transaction manager is tracking nonces for every wallet in use. Based on the local history and the information provided
+by the blockchain ([`getTransactionCount`](https://web3js.readthedocs.io/en/1.0/web3-eth.html#eth-gettransactioncount)),
+it calculate a nonce and automatically adds it to the transaction parameters. However, it's possible to set the [nonce manually](#customize-web3-parameters).
+
+#### Transaction queue
+There is a limit of 100 transactions that were sent to the blockchain but haven't been mined yet. Once the limit is reached,
+all subsequent transactions will be queued until a free slot appeared. The manager checks the number of submitted transactions every minute.
+
+#### Methods and attributes
 - `getTxStat()` - returns an object with key-value pairs:
-    - submitted - the number of transactions that were sent to the blockchain but haven't been mined yet
-    - pending - pending - the number of transactions that have been passed to the txManager but haven't been sent to the blockchain
-    - failed - the number of failed transactions
-    - confirmed - the number of confirmed transaction (i.e. mined ones)
-    - retries - the total number of retries attempted for failed transactions
-    - totalGasUsed - the total number of 'gas' units spent
-    - totalEthSpent - the total amount of ETH spent
+    - `submitted` - the number of transactions that were sent to the blockchain but haven't been mined yet
+    - `pending` - pending - the number of transactions that have been passed to the txManager but haven't been sent to the blockchain
+    - `failed` - the number of failed transactions
+    - `confirmed` - the number of confirmed transaction (i.e. mined ones)
+    - `retries` - the total number of retries attempted for failed transactions
+    - `totalGasUsed` - the total number of 'gas' units spent
+    - `totalEthSpent` - the total amount of ETH spent
 - `totalGasUsed` - see above
 - `totalEthSpent` - see above
 
-The `totalEthSpent` is increased after every transaction: `totalEthSpent` += `gasPrice` * `gasUsed`.
+#### Expenses tracking
+The `totalEthSpent` is being increased as `totalEthSpent` += `gasPrice` * `gasUsed`.
 
-`gaUsed` is an Interface instance property; it indicates the number of gas units that have been used by a particular transaction.
+`gaUsed` is an Interface instance property; it indicates the number of gas units that have been used by the latest transaction.
 
+#### Examples
 ```javascript
 token.gasPrice = 10;  // set a higher gasPrice to get the transaction mined faster
 const testWallet = '0xABC...';
@@ -621,7 +746,7 @@ As a workaround, you may create a native Web3 class instance and pass it to the 
 
 
 ## Troubleshooting
-##### Transactions are too slow
+### Transactions are too slow
 Increase a gas price:
 ```javascript
 const { ERC20 } = require('eth-sci');
@@ -631,7 +756,7 @@ token.gasPrice = 3; // in gWei
 ...
 ```
 
-##### Error: Exceeds block gas limit
+### Error: Exceeds block gas limit
 Decrease the gasLimit:
 ```javascript
 const { ERC20 } = require('eth-sci');
@@ -641,13 +766,13 @@ token.gasLimit = '3000000'
 ...
 ```
 
-#### Error: Cannot find module 'ethereumjs-wallet/hdkey'
+### Error: Cannot find module 'ethereumjs-wallet/hdkey'
 ```bash
 $ npm uninstall ethereumjs-wallet
 $ npm install ethereumjs-wallet@0.6.0
 ```
 
-#### The compiler fails with 'Source file requires different compiler version' error
+### The compiler fails with 'Source file requires different compiler version' error
 First of all, stay on top of things and don't use obsolete technologies, consider to align your project in accordance with the most recent requirements.
 
 The 'compile' module uses 'solc' version 0.5.x. If your pragma parameter is set to something like '^0.4.23', plese try to change it to '>=0.4.23'.

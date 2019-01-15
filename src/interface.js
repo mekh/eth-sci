@@ -749,13 +749,13 @@ class Interface {
         return Math.ceil(gasPrice * multiplier);
     }
 
-    async deploy(args, callback) {
-        args = args || {};
-        const bytecode = args.bytecode || this.bytecode;
-        const contractArguments = args.args || [];
+    async deploy(options, callback) {
+        options = options || {};
+        const bytecode = options.bytecode || this.bytecode;
+        const contractArguments = options.args || [];
         await this.init();
         const blockGasPrice = await this.getGasPrice(1);
-        const gasPrice = this.gasPrice || await this.getGasPrice(1.2);
+        const gasPrice = options.gasPrice || this.gasPrice || await this.getGasPrice(1.2);
         if(parseInt(blockGasPrice) > gasPrice) {
             log.warn(`the gas price is too low: ` +
                 `blockchain - ${fromWei(blockGasPrice, 'gwei')}, ` +
@@ -763,13 +763,13 @@ class Interface {
         }
 
         const params = {
-            from: this.wallet,
+            from: options.from || this.wallet,
             gas: this.gasLimit,
             gasPrice: gasPrice
         };
 
-        if(args.nonce) {
-            params.nonce = args.nonce;
+        if(options.nonce) {
+            params.nonce = options.nonce;
         } else {
             let { nextNonce, releaseNonceLock } = await this.txManager.getNonce(params.from, this.w3);
             params.nonce = nextNonce;
@@ -820,7 +820,7 @@ class Interface {
         let gasPrice = retryOptions.gasPrice || this.gasPrice || await this.getGasPrice(1.2); //block gasPrice + 20%
         const verify = retryOptions.verify;
         const retry = retryOptions.retry || 3;
-        const incBase = retryOptions.incBase || 1.3;
+        const incBase = retryOptions.incBase || 1;
 
         let counter = 0;
 

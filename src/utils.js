@@ -2,7 +2,7 @@
 const solc = require('solc');
 const Web3 = require('web3');
 
-const compile = async source => {
+const compile = async (source, callback) => {
     const input  = {
         language: 'Solidity',
         sources: {
@@ -22,7 +22,7 @@ const compile = async source => {
     const compiled = await solc.compile(JSON.stringify(input));
     const {errors, contracts} = JSON.parse(compiled);
     if(errors && errors.length) {
-        throw new Error('\n' + errors.map(e => e.formattedMessage + '\n'))
+        return returnValue('\n' + errors.map(e => e.formattedMessage + '\n'), null, callback)
     }
 
     const result = {};
@@ -32,7 +32,7 @@ const compile = async source => {
         result[item] = {abi: path.abi, bytecode: "0x" + bytecode};
     }
 
-    return result;
+    return returnValue(null, result, callback);
 };
 
 
