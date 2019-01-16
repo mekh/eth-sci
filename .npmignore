@@ -1,0 +1,7 @@
+.idea
+.git
+.nyc_output
+log
+logs
+_tests
+package-lock.json

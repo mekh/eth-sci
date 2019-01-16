@@ -504,12 +504,12 @@ const proxyHandler = {
 
                 subscription = new Subscription(obj.w3.currentProvider.wsId);
                 subscription.subscribe(obj, event, args);
-                log.silly(`[${subscription.id}] [${obj.address}] -> subscribed to ${event}`);
+                log.debug(`[${subscription.id}] [${obj.address}] -> subscribed to ${event}`);
 
                 emitter.on('restoreSubscription', async (wsId)  => {
                     const webSocketId = subscription.id;
                     if(!webSocketId || wsId !== webSocketId || subscription.unsibscribed) return;
-                    log.silly(`[${wsId}] [${obj.address}] Restoring the "${prop}" subscription...`);
+                    log.debug(`[${wsId}] [${obj.address}] Restoring the "${prop}" subscription...`);
                     subscription.subscribe(obj, event, args);
                 });
 
@@ -830,7 +830,7 @@ class Interface {
             const updateTx = () => {
                 let msg = `${methodArgs.join(', ')} - ${txMeta.txHash} -> Tx Success`;
                 if(verified) msg += `, VERIFIED`;
-                log.txinfo(`[try #${counter}] [txId ${txMeta.id}] ` + msg);
+                log.debug(`[try #${counter}] [txId ${txMeta.id}] ` + msg);
                 if(txMeta.id) {
                     txMeta.status = 'confirmed';
                     this.txManager.updateTx(txMeta);

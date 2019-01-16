@@ -1,5 +1,5 @@
 # Ethereum Smart Contract Interface
-A NodeJS library for compiling, deploying, and interacting with the smart contracts.
+A NodeJS library for compiling, deploying, and interacting with smart contracts.
 It is built on top of the [web3](https://www.npmjs.com/package/web3) library.
 
 The sole purpose of this project is to simplify a backend/dAapp development process, as a result, to save tons of time.
@@ -43,20 +43,28 @@ Table of content:
         - [Expenses tracking](#expenses-tracking)
         - [Examples](#examples)
     - [Logging](#logging)
+        - [Enabling built-in logger](#enabling-built-in-logger)
+        - [Supported log-levels](#supported-log-levels)
+        - [Log message formats](#log-message-formats)
+            - [Transactions log](#transaction-log)
+            - [WebSocket log](#websocket-log)
+            - [Deployment log](#deployment-log)
+        - [Passing you own logger](#passing-you-own-logger)
+        - [Custom logger example](#custom-logger-example)
     - [Accessing the underlying Web3 instance](#accessing-the-underlying-web3-instance)
 - [Limitations](#limitations)
 - [Troubleshooting](#troubleshooting)
     - [Transactions are too slow](#transactions-are-too-slow)
     - [Error: Exceeds block gas limit](#error-exceeds-block-gas-limit)
-    - [Error: Cannot find module 'ethereumjs-wallet/hdkey'](#)
-    - [The compiler fails with 'Source file requires different compiler version' error](#)
+    - [Error: Cannot find module 'ethereumjs-wallet/hdkey'](#error-cannot-find-module-ethereumjs-wallethdkey)
+    - [The compiler fails with 'Source file requires different compiler version' error](#the-compiler-fails-with-source-file-requires-different-compiler-version-error)
 - [License](#license)
 
 
 ## Features
-- extremaly easy to [setup](#installation) and [use](#quick-start)
+- extremely easy to [setup](#installation) and [use](#quick-start)
 - suitable for **any smart contract**
-- all-in-one library, it includes methods for [compilation](#compilation), [deployment](#deployment), and [working](#usage) with contract's methods and events
+- all-in-one library, it includes methods for [compilation](#compilation), [deployment](#deployment), and [working](#usage) with contracts methods and events
 - automatic [nonce calculation](#nonce-calculation) and tracking - no more 'await' or nonce calculation routines before each next transaction
 - gas/eth [expenses tracking](#expenses-tracking)
 - supports http(s), ws(s), and ipc protocols
@@ -74,6 +82,13 @@ $ npm install --save eth-sci
 ```
 
 ## Quick start
+There are two classes are being exposed by the library - `Interface` and `ERC20`.
+The only difference between them is that the `ERC20` one is initialized with the
+[standard ERC20 abi](#https://theethereum.wiki/w/index.php/ERC20_Token_Standard#The_ERC20_Token_Standard_Interface),
+while the `Interface` expects to get the ABI upon initialization.
+
+You're still able [to pass](#the-constructor-parameters) (upon init) or [set](#setters-and-getters) (in run-time) any ABI for both.
+
 ### Unsigned transactions
 ```javascript
 const { ERC20 } = require('eth-sci');
@@ -83,7 +98,7 @@ const token = new ERC20(
     '0x45F1F44dE1...'
 );
 
-// Resolve a promise
+// Resolve promise
 token.totalSupply().then(console.log);
 token.name().then(console.log);
 
@@ -99,7 +114,7 @@ checkBalance('0x4b32C...').then(console.log);
 ```
 
 ### Signed transactions
-In order to be able to alter the contract state, you have to pass either a mnemonic or a private key (an array of keys) to the constructor:
+In order to be able to alter the contract state, you have to pass either a mnemonic, a private key, or an array of keys to the constructor:
 ```javascript
 const { ERC20 } = require('eth-sci');
 const mnemonic = '12 words mnemonic';
@@ -177,15 +192,15 @@ token.transfer(testWallet, 100).then(console.log);
 ## Usage
 Following modules are being exported by the library:
 
-- Interface - general-purpose class. Use it as the parent class for your subclasses
-- Web3 - returns the web3 instance activated by a provider. The type of the provider is defined out of the protocol type (web socket, http, ipc). Supports mnemonic and a private key(s) authorization types.
-- ERC20 - derived from the Interface class; can be used for accessing the ERC20 tokens' standard methods (name, symbol, totalSupply, etc.)
-- utils - a set of utils that includes a 'compile' module - it compiles the source code and returns an object containing abi and bytecode
-- setLogger - a function that sets a logger (see below)
+- `**Interface**` - general-purpose class. Requires ABI, can be used as a parent class.
+- `**Web3**` - returns the web3 instance activated by a provider. The type of the provider is defined out of the protocol type (web socket, http, ipc). Supports mnemonic and a private key(s) authorization types.
+- `**ERC20**` - derived from the Interface class; can be used for accessing the ERC20 tokens' standard methods (name, symbol, totalSupply, etc.)
+- `**utils**` - a set of utils that includes a 'compile' module - it compiles the source code and returns an object containing abi and bytecode
+- `**setLogger**` - a function that sets a logger (see below)
 
 It supports both promises and the async-await calls with or without the callbacks.
 
-By default, the ERC20 class instance is initialized with a standard ERC20 abi.
+By default, the `ERC20` class instance is initialized with a standard ERC20 abi.
 
 The following methods are supported out of the box:
 - `name()`
@@ -214,7 +229,7 @@ Events:
 |`contractAddress`|address|null|false|contract address|
 |`authKey`|string\|hex-string\|array of hex-strings|null|false|12-words mnemonic, a private key or an array of them|
 |`web3Instance`|Web3|null|false|a custom Web3 instance|
-|`abi`|array|ERC20|false|an ABI|
+|`abi`|array|null|true|an ABI|
 |`bytecode`|hex-string|null|false|"0x"-prefixed bytecode|
 
 ### Instance attributes:
@@ -374,7 +389,7 @@ contract Token is Ownable {
 ```
 
 ##### Passing arguments to the contract
-In the [example above](#contract-source-code), the Token contract constructor requires 4 positional arguments:
+In the [example above](#Compilation and deployment example), the Token contract constructor requires 4 positional arguments:
 - name
 - symbol
 - decimals
@@ -554,20 +569,32 @@ For any send-type transaction, it is possible to define a 'retryOptions' object 
 
 The `verify` function (if defined) will get all the arguments that were passed to the original contract's method.
 
-In the `incBase` > 1, the `gasPrice` will be increased on each next iteration as `gasPrice = gasPriceBase * incBase ** count`
+If the `incBase` > 1, the `gasPrice` will be increased on each next iteration as `gasPrice = gasPriceBase * incBase ** count`,
+where the `gasPriceBase` is either `retryOptions.gasPrice`, `this.gasPrice`, or the gasPrice provided by the `web3.eth.getGasPrice() * 1.2` method:
+```javascript
+    async getGasPrice(multiplier) {
+        multiplier = multiplier || 1;
+        const gasPrice = await this.w3.eth.getGasPrice();
+        return Math.ceil(gasPrice * multiplier);
+    }
+
+    async sendWithRetry() {
+        ...
+        let gasPrice = retryOptions.gasPrice || this.gasPrice || await this.getGasPrice(1.2);
+        ...
+    }
+```
 
 #### Gas price calculation
-If the initial `gasPrice` is **3gWei**, and the `incBase` has a value **1.3**, the gasPrice will be changed as
+If the initial `gasPrice` is **3gWei**, and the `incBase` has a value of **1.3**, the gasPrice will be changed as
 
-|retry #|equation|gasPrice|
+|retry #|evaluation|gasPrice|
 |---|---|---|
 |0|3 * 1.3^0|3|
 |1|3 * 1.3^1|3.9|
 |2|3 * 1.3^2|5.07|
 |3|3 * 1.3^3|6.591|
 |4|3 * 1.3^4|8.5683|
-
-In order to keep the gasPrice invariable, set the `incBase` to 1.
 
 #### Example
 A contract:
@@ -705,7 +732,134 @@ Total: 2
 ```
 
 ### Logging
-TODO
+The library contains a built-in logger represented as a simple wrapper of the `console.log`. It prints a comprehensive information
+about each transaction as well as the accumulated statistic of all the transactions performed since app has been started.
+
+Log format:
+
+**\[timestamp\] \[loglevel\] logmessage**
+
+For each send-type transaction, the logger fires the following messages:
+- (before sending) prints accumulated stat about all the transactions
+- (before sending) prints the unique transaction id and the entire information about the input parameters
+- a transaction hash once tx is sent
+- execution status - CONFIRMED or FAILED
+- updated information that includes a block number, a duration, the amount of gas used, etc.
+```
+[2019-01-16T05:51:40.870Z] [debug] {"submitted":2,"pending":0,"failed":0,"confirmed":1,"retries":0,"totalGasUsed":"4698743","totalEthSpent":"0.004359"}
+[2019-01-16T05:51:41.014Z] [debug] updateTx[0]: 3038736358014506 -> {"id":3038736358014506,"from":"0x095e15c...", ..., "status":"submitted", ...}
+[2019-01-16T05:51:41.132Z] [debug] transactionHash: 3038736358014506 -> 0x404d1cb...
+[2019-01-16T05:51:48.318Z] [debug] submitTx: CONFIRMED - 3038736358014506
+[2019-01-16T05:51:48.319Z] [debug] updateTx[0]: 3038736358014506 -> {..., "status":"confirmed", ...}
+```
+#### Enabling built-in logger
+To activate the logger, set the **LOG_LEVEL** environment variable to **debug**.
+
+#### Supported log-levels
+The logger uses the following log levels:
+- **error**
+- **warn**
+- **info**
+- **debug**
+
+#### Log message formats
+##### Transaction log:
+  - id: `Number` - a unique ID of the transaction
+  - from: `String` - the address the transaction was sent from
+  - method: `String` method name
+  - methodArgs: `Array` - the list of arguments that was passed to the smart contract method
+  - options: `Object` - transaction options
+    - from: `String` - the address the transaction was sent from
+    - gas: `String` - gas limit (hex)
+    - gasPrice: `String` - gas price (hex)
+    - nonce: `String` - nonce (hex)
+    - data: `String` - data (hex)
+    - value: `String` - amount of ETH that was sent
+    - to: `String` - smart contract address
+  },
+  - txType: `String` - transaction type (send, call)
+  - time: `Number` - epoch timestamp (when the tx was submitted)
+  - status: `String` - tx status (submitted, failed, confirmed)
+  - nonce: `Number` - nonce
+  - lastUpdate: `Number` - epoch timestamp (when the tx was updated)
+  - duration: `Number` - time (in seconds) that passed before tx got mined
+  - txHash: `String` - tx hash
+  - blockNumber: `Number` - the block the tx was included to
+  - gasUsed: `Number` - the amount of gas that was spent for this transaction
+  - totalGasUsed: `String` - total amount of gas (since the application start)
+
+##### WebSocket log:
+```
+[2019-01-16T05:50:38.804Z] [info] [1] WebSocket - connected to "wss://wss.endpoint.uri"
+[2019-01-16T05:51:40.762Z] [debug] [1] [0x1FE10f0B...] -> subscribed to Transfer
+...
+[2019-01-16T05:54:30.267Z] [error] [1] WebSocket - connection error "wss://wss.endpoint.uri"
+[2019-01-16T09:59:45.871Z] [info] [1] WebSocket - connected to "wss://wss.endpoint.uri"
+[2019-01-16T09:59:45.873Z] [debug] [1] [0x1FE10f0B...] Restoring the "onTransfer" subscription...
+```
+
+##### Deployment log:
+```
+[2019-01-16T07:00:42.419Z] [debug]  Tx hash: 0x48276e05...       <--- transaction hash
+[2019-01-16T07:00:47.570Z] [debug]  address 0x2aa09C6...         <--- contract address
+[2019-01-16T07:00:47.577Z] [debug] {"deploy":{"gasUsed":25...}}  <--- tx expenses
+[2019-01-16T07:00:47.636Z] [debug] updateTx[0]: 324... -> {"method":"deploy", ...}   <- tx stat
+```
+
+#### Passing you own logger
+There is the only one requirement - **the logger must support [these methods](#supported-log-levels)**:
+- **error**
+- **warn**
+- **info**
+- **debug**
+
+If the logger conforms the requirements, import the 'setLogger' method and pass your logger as an argument.
+```javascript
+const { setLogger } = require('eth-sci');
+const myLogger = ...;
+...
+setLogger(myLogger);
+```
+
+#### Custom logger example
+`logger.js`
+```javascript
+const winston = require('winston');
+const path = require('path');
+const { combine, timestamp, printf } = winston.format;
+
+module.exports = (logLevel, filename, logDir) => {
+    logDir = logDir || './log';
+    filename = filename || 'combined.log';
+    const logFormat = printf(info => {
+        return `[${info.timestamp}] [${process.pid}] [${info.level}]: ${info.message}`;
+    });
+
+    return winston.createLogger({
+        transports : [
+            new winston.transports.File({
+                level: logLevel || 'error',
+                format: combine(
+                    timestamp({format: 'YYYY-MM-DD HH:mm:ss.SSS'}),
+                    logFormat
+                ),
+                filename: path.join(logDir, filename),
+                handleExceptions: true
+            }),
+        ],
+        exitOnError: false
+    });
+};
+```
+By default, `winston` supports [the required](#supported-log-levels) log levels, so all we need to do is:
+```javascript
+const { ..., setLogger } = require('eth-sci');
+const myLogger = require('./logger');
+
+const logger = myLogger('debug');
+setLogger(logger);
+...
+```
 
 ### Accessing the underlying Web3 instance
 
@@ -713,22 +867,23 @@ All the methods/attribute that is being provided by the Web3 library are accessi
 
 ```javascript
 const { Interface } = require('eth-sci');
+const contractAbi = require('./contract-abi.json');
 ...
-const contract = new Interface(nodeAddress, contractAddress, mnemonic);
+const contract = new Interface(nodeAddress, contractAddress, mnemonic, null, contractAbi);
 
 const web3 = contract.w3;
 
 // get a transaction receipt
-contract.w3.eth.getTransactionReceipt("0x...").then(...);
+web3.eth.getTransactionReceipt("0x...").then(...);
 
 // get a nonce at block 7063638
-contract.w3.eth.getTransactionCount("0xABC...", 7063638).then(...);
+web3.eth.getTransactionCount("0xABC...", 7063638).then(...);
 
 //get gasPrice
-contract.w3.eth.getGasPrice().then(...);
+web3.eth.getGasPrice().then(...);
 
 // send 1 ETH
-contract.w3.eth.sendTransaction({
+web3.eth.sendTransaction({
     from: contract.accounts[0],
     to: "0xABC...",
     value: contract.w3.utils.toWei(1, 'ether');
@@ -741,7 +896,7 @@ contract.events.MyEvent([options][, callback])
 See the [official web3.js documentation](https://web3js.readthedocs.io/en/1.0/index.html)
 
 ## Limitations
-- the library does not support 'HTTP Basic Authentication' for the web3 lib. Fell free to contact me or make a pool request.
+- the library does not support 'HTTP Basic Authentication' for the web3 lib. Feel free to contact me or make a pool request.
 As a workaround, you may create a native Web3 class instance and pass it to the library constructor. [More info](#using-a-custom-web3-instance)
 
 
