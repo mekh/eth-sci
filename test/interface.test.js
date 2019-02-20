@@ -78,6 +78,7 @@ describe ('INTERFACE LIBRARY (positive testing)', () => {
         it('the number of elements in the proxyMethods is equal to the sum of functions and events in the abi', async () => {
             const testAI = await new testInterface(null, null, null, web3, abi);
             const proxyMethods = abi.filter(item => item.type === 'event' || item.type === 'function');
+            proxyMethods.push('_deploy');
             assert.strictEqual(
                 Object.keys(testAI.proxyMethods).length,
                 Object.keys(proxyMethods).length

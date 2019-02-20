@@ -1,6 +1,6 @@
 /**
  * Ethereum Smart Contract Interface - a NodeJS library for compiling, deploying, and interacting with the smart contracts
- * Copyright (C) 2019,  Alexandr V.Mekh.
+ * Copyright (C) 2019,  Alexandr V.Mekh
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -25,8 +25,8 @@ const Mutex = require('await-semaphore').Mutex;
 const extend = require('xtend');
 const net = require('net');
 const bn = require('big-integer');
+const _ = require('lodash');
 const utils = require('./utils');
-
 const erc20 = require('./ERC20');
 const {
     FixedLengthArray,
@@ -172,11 +172,13 @@ class TransactionManager {
         const isObject = (lastArgType === 'function' || lastArgType === 'object' && !!lastArg) && !Array.isArray(lastArg);
 
         const options = isObject ? methodArgs.pop() : {};
+        if(!obj.accounts) await obj.init();
 
         options.from = options.from || obj.wallet;
-        let txType;
+        let txType = 'call';
 
-        if(obj._sent.includes(method)) {
+        if(!obj._call.includes(method)) {
+            txType = 'send';
             options.gas = options.gas || obj.gasLimit || '6000000';
             options.gasPrice = options.gasPrice || obj.gasPrice;
             const gasPrice = await obj.w3.eth.getGasPrice();
@@ -187,11 +189,6 @@ class TransactionManager {
             } else if(options.gasPrice > parseInt(gasPrice) * 10) {
                 log.warn(`the gas price is too HIGH: blockchain - ${fromWei(gasPrice, 'gwei')}, TxObject - ${fromWei(options.gasPrice, 'gwei')} (GWEI)`)
             }
-            txType = 'send';
-        } else if(obj._call.includes(method)){
-            txType = 'call';
-        } else {
-            throw new Error(`proxyHandler: Unsupported method "${method}"`);
         }
 
         return new TransactionObject({
@@ -246,18 +243,18 @@ class TransactionManager {
         }
     };
 
-    async submitTx(obj, txMeta, defer, lock=false) {
-        let err, result, releaseTxLock;
+    async submitTx(obj, txMeta, defer, path) {
+        let err, result;
+        const exec = _.get(obj, path || 'contract.methods');
 
         const { method, methodArgs, options, txType } = txMeta;
         if(txType === 'call') {
-            [err, result] = await _to(obj.contract.methods[method](...methodArgs).call(options));
+            [err, result] = await _to(exec[method](...methodArgs).call(options));
             return [err, result]
         }
         log.debug(JSON.stringify(this.getTxStat('submitTxIN')));
 
         await this._globalLockFree();
-        releaseTxLock = lock ? await this._getLock(txMeta.from) : () => {};
 
         // get existing or assign a new transaction id
         txMeta.id = this.addTx(txMeta);
@@ -301,7 +298,7 @@ class TransactionManager {
         log.debug(JSON.stringify(this.getTxStat(txMeta.id)));
 
 
-        [err, result] = await _to(obj.contract.methods[method](...methodArgs)
+        [err, result] = await _to(exec[method](...methodArgs)
             .send(options)
             .on('transactionHash', hash => {
                 defer.eventEmitter.emit('transactionHash', hash);
@@ -319,8 +316,6 @@ class TransactionManager {
             }));
 
 
-        releaseTxLock();
-
         if(txMeta.txHash) {
             const receipt = await obj.w3.eth.getTransactionReceipt(txMeta.txHash);
             gasUsed = receipt ? receipt.gasUsed || 0 : 0;
@@ -336,6 +331,8 @@ class TransactionManager {
         if(!err) {
             log.debug(`submitTx: CONFIRMED - ${txMeta.id} `);
             txMeta.status = 'confirmed';
+
+            if(method === 'deploy' && path === 'contract') obj.at(result.options.address);
         }
         else {
             if(err.message && err.message.includes('Transaction ran out of gas')) {
@@ -520,6 +517,7 @@ const proxyHandler = {
         }
 
         obj[prop] = function proxyAddProp () {
+            let path = 'contract.methods';
             const defer = PromiEvent();
             const args = [].slice.call(arguments);
 
@@ -532,9 +530,14 @@ const proxyHandler = {
                 retryOptions = args.splice(idx, 1)[0].retryOptions;
             }
 
+            if(prop === '_deploy') {
+                path = 'contract';
+                prop = 'deploy'
+            }
+
             const send = (meta) => {
                 if(!retryOptions) {
-                    obj.txManager.submitTx(obj, meta, defer).then(([err, res]) => {
+                    obj.txManager.submitTx(obj, meta, defer, path).then(([err, res]) => {
                         returnValue(err, res, defer, callback);
                     })
                 } else {
@@ -687,7 +690,7 @@ class Interface {
         this._sent = this.abi.filter(item => !_callStates.includes(item.stateMutability) && item.type === 'function').map(item => item.name);
         this._call = this.abi.filter(item => _callStates.includes(item.stateMutability) && item.type === 'function').map(item => item.name);
         this._events = this.abi.filter(item => item.type === 'event').map(item => 'on' + item.name);
-        this.proxyMethods = this._sent.concat(this._call).concat(this._events);
+        this.proxyMethods = this._sent.concat(['_deploy']).concat(this._call).concat(this._events);
     }
 
     static web3 (web3Instance, contractAddress, abi, bytecode) {
@@ -749,64 +752,19 @@ class Interface {
         return Math.ceil(gasPrice * multiplier);
     }
 
-    async deploy(options, callback) {
+    deploy(options, callback) {
         options = options || {};
-        const bytecode = options.bytecode || this.bytecode;
-        const contractArguments = options.args || [];
-        await this.init();
-        const blockGasPrice = await this.getGasPrice(1);
-        const gasPrice = options.gasPrice || this.gasPrice || await this.getGasPrice(1.2);
-        if(parseInt(blockGasPrice) > gasPrice) {
-            log.warn(`the gas price is too low: ` +
-                `blockchain - ${fromWei(blockGasPrice, 'gwei')}, ` +
-                `TxObject - ${fromWei(gasPrice, 'gwei')} (GWEI)`)
-        }
 
-        const params = {
-            from: options.from || this.wallet,
-            gas: this.gasLimit,
-            gasPrice: gasPrice
-        };
+        const {from, gas, gasPrice, gasLimit, nonce, value} = options;
 
-        if(options.nonce) {
-            params.nonce = options.nonce;
-        } else {
-            let { nextNonce, releaseNonceLock } = await this.txManager.getNonce(params.from, this.w3);
-            params.nonce = nextNonce;
-            releaseNonceLock()
-        }
+        const args = [
+            {data: options.bytecode || this.bytecode, arguments: options.args || []},
+            {from, gas, gasPrice, gasLimit, nonce, value}
+        ];
 
-        const txMeta = {method: 'deploy', from: this.wallet, params: params, contractArguments: contractArguments, nonce: params.nonce};
-        this.txManager.addTx(txMeta);
+        if (callback) args.push(callback);
 
-        const [err, result] = await _to(this.contract.deploy({data: bytecode, arguments: contractArguments})
-            .send(params)
-            .once('transactionHash', (hash) => log.debug(` Tx hash: ${hash}`))
-            .once('confirmation', (num, rec) => {
-                log.debug(` address ${rec.contractAddress}`);
-
-                let weiSpent = bn(rec.gasUsed).multiply(bn(gasPrice)).toString();
-
-                if(rec) this.txManager.updateStat(rec.gasUsed, gasPrice);
-
-                log.debug(JSON.stringify({
-                    deploy: {
-                        gasUsed: rec.gasUsed,
-                        gasPrice: gasPrice,
-                        weiSpent: weiSpent,
-                        totalEthSpent: this.txManager.totalEthSpent
-                    }
-                }));
-            }));
-
-        // delete tx data to reduce the log size
-        delete txMeta.params.data;
-        if(!err) {
-            this.at(result.options.address);
-            txMeta.status = 'confirmed';
-        } else { txMeta.status = 'failed' }
-        this.txManager.updateTx(txMeta);
-        returnValue(err, result, callback);
+        return this._deploy(...args);
     };
 
     async sendWithRetry (txMeta, retryOptions, defer) {
@@ -877,7 +835,7 @@ class Interface {
 
             counter++;
 
-        } while (!(result || counter > retry));
+        } while (!(result !== undefined || counter > retry));
         log.error(`[try #${counter - 1}] [tx.id ${txMeta.id}] [txHash ${txMeta.txHash}] ${methodArgs.join(', ')} - Tx Failed`);
         return [err, result]
     };

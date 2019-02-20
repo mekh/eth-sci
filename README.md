@@ -9,7 +9,7 @@ as well as the events listed within the ABI.
 From now on, you're able to call the methods as `instance.methodName(methodArgs)`. As for the events, just add 'on'
 prefix before the event name - for example: `instance.onTransfer(callback)`
 
-Table of content:
+## Table of content:
 - [Features](#features)
 - [Installation](#installation)
 - [Quick start](#quick-start)
@@ -84,7 +84,7 @@ $ npm install --save eth-sci
 ## Quick start
 There are two classes are being exposed by the library - `Interface` and `ERC20`.
 The only difference between them is that the `ERC20` one is initialized with the
-[standard ERC20 abi](#https://theethereum.wiki/w/index.php/ERC20_Token_Standard#The_ERC20_Token_Standard_Interface),
+[standard ERC20 abi](https://theethereum.wiki/w/index.php/ERC20_Token_Standard#The_ERC20_Token_Standard_Interface),
 while the `Interface` expects to get the ABI upon initialization.
 
 You're still able [to pass](#the-constructor-parameters) (upon init) or [set](#setters-and-getters) (in run-time) any ABI for both.
@@ -192,11 +192,11 @@ token.transfer(testWallet, 100).then(console.log);
 ## Usage
 Following modules are being exported by the library:
 
-- `**Interface**` - general-purpose class. Requires ABI, can be used as a parent class.
-- `**Web3**` - returns the web3 instance activated by a provider. The type of the provider is defined out of the protocol type (web socket, http, ipc). Supports mnemonic and a private key(s) authorization types.
-- `**ERC20**` - derived from the Interface class; can be used for accessing the ERC20 tokens' standard methods (name, symbol, totalSupply, etc.)
-- `**utils**` - a set of utils that includes a 'compile' module - it compiles the source code and returns an object containing abi and bytecode
-- `**setLogger**` - a function that sets a logger (see below)
+- **`Interface`** - general-purpose class. Requires ABI, can be used directly or as a parent class.
+- **`Web3`** - returns the web3 instance activated by a provider. The type of the provider is defined out of the protocol type (web socket, http, ipc). Supports mnemonic and a private key(s) authorization types.
+- **`ERC20`** - derived from the Interface class; can be used for accessing the ERC20 tokens' standard methods (name, symbol, totalSupply, etc.)
+- **`utils`** - a set of utils that includes a 'compile' module - it compiles the source code and returns an object containing abi and bytecode
+- **`setLogger`** - a function that sets a logger (see below)
 
 It supports both promises and the async-await calls with or without the callbacks.
 
@@ -524,9 +524,9 @@ There are three types of events are being emitted upon sending a transaction:
 contract.myMethod(methodArguments)
     .on('transactionHash', h => console.log(`TxHash: ${h}`)
     .on('receipt', r => console.log(`Receipt: ${r}`)
-    .on('error', e => console.log(`Erorr: ${r}`)
+    .on('error', e => console.log(`Error: ${e}`)
     .then(() => console.log('Done')
-    .catch(() => console.log('Fail');
+    .catch(() => console.log('Fail')
 ```
 
 [More info](https://web3js.readthedocs.io/en/1.0/web3-eth-contract.html#methods-mymethod-send)

@@ -1,8 +1,9 @@
 'use strict';
 const solc = require('solc');
-const Web3 = require('web3');
+const { utils } = require('web3');
+const bn = require('big-integer');
 
-const compile = async (source, callback) => {
+exports.compile = async (source, callback) => {
     const input  = {
         language: 'Solidity',
         sources: {
@@ -66,8 +67,9 @@ const returnValue = (err, result, defer, callback) => {
     else return result
 };
 
+exports.returnValue = returnValue;
 
-function FixedLengthArray(lengthLimit, unique=false) {
+exports.FixedLengthArray = function (lengthLimit, unique=false) {
     let array = [];
 
     array.has = function() {
@@ -100,35 +102,46 @@ function FixedLengthArray(lengthLimit, unique=false) {
     };
 
     return array;
-}
-
-
-const toChecksum = (address) => {
-    return Web3.utils.toChecksumAddress(address)
 };
 
+exports.epochToDateString = (timestamp) => {
+    const d = new Date();
+    const date = new Date(timestamp * 1000 + d.getTimezoneOffset() * 60000);
+    const year = date.getFullYear();
+    let month = date.getMonth() + 1;
+    let day = date.getDate();
+    let hours = date.getHours();
+    let minutes = date.getMinutes();
+    let seconds = date.getSeconds();
 
-const toWei = (amount, unit) => {
-    return Web3.utils.toWei(amount.toString(), unit);
+    month = month < 10 ? '0' + month : month;
+    day = day < 10 ? '0' + day : day;
+    hours = hours < 10 ? '0' + hours : hours;
+    minutes = minutes < 10 ? '0' + minutes : minutes;
+    seconds = seconds < 10 ? '0' + seconds : seconds;
+
+    return year + '/' + month + '/' + day + ' ' + hours + ':' + minutes + ':' + seconds;
 };
 
+const fromWei = (amount, unit) => utils.fromWei(amount.toString(), unit);
+exports.toWei = (amount, unit) => utils.toWei(amount.toString(), unit);
+exports.toChecksum = address => utils.toChecksumAddress(address);
+exports.fromWei = fromWei;
 
-const fromWei = (amount, unit) => {
-    return Web3.utils.fromWei(amount.toString(), unit);
+exports.isAddress = address => utils.isAddress(address.toLowerCase());
+
+exports.toToken = (value, decimals) => {
+    if(decimals === 18) return fromWei(value.toString(), 'ether');
+
+    let tenToRemainingDecimalPlaces = bn(10).pow(18 - decimals);
+    let asIf18 = bn(value).multiply(tenToRemainingDecimalPlaces).toString(10);
+    return fromWei(asIf18, 'ether');
 };
 
-
-function _to (promise) {
+exports._to = function (promise) {
     return promise
         .then(data => [null, data])
         .catch(err => [err, null]);
-}
-
-const sleep = (ms) => {
-    return new Promise(resolve => setTimeout(resolve, ms));
 };
 
-module.exports = {
-    compile, returnValue, FixedLengthArray, toChecksum, toWei, fromWei, _to, sleep
-
-};
+exports.sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
