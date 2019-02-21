@@ -579,12 +579,9 @@ class Web3 {
             ws: Web3js.providers.WebsocketProvider
         };
 
-        let provider;
+        let provider = new providers[protocol](nodeAddress, protocol === 'ipc' ? net : null);
 
-        if (protocol === 'ipc') {
-            provider = new providers[protocol](nodeAddress, net);
-        }
-        else if (mnemonic) {
+        if (mnemonic) {
             let addressesToUnlock = 20;
 
             if (mnemonic.indexOf(" ") === -1 || Array.isArray(mnemonic)) {
@@ -592,12 +589,12 @@ class Web3 {
                 addressesToUnlock = privateKeys.length;
             }
 
-            provider = new HDWalletProvider(mnemonic, nodeAddress, 0, addressesToUnlock);
+            provider = new HDWalletProvider(mnemonic, provider, 0, addressesToUnlock);
             provider.engine.stop(); // stop block-polling
 
         } else if (protocol.startsWith('ws')) {
             this.wsId = ++wsId;
-            this.web3 = new Web3js(new providers[protocol](nodeAddress));
+            this.web3 = new Web3js(new provider);
 
             let shouldLog = true;
             let isFailed = false;
@@ -631,11 +628,7 @@ class Web3 {
 
                 return provider
             };
-
             provider = getProvider();
-
-        } else {
-            provider = new providers[protocol](nodeAddress);
         }
 
         this.web3 = new Web3js(provider);
