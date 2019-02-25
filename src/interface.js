@@ -97,7 +97,7 @@ class TransactionManager {
         this.tx = [];
         this.totalGasUsed = bn.zero;
         this.totalEthSpent = 0;
-        this._retries = 0;
+        this.retries = 0;
         this._lockMap = {};
         this._nonceInUse = {};
         this._idCounter = Math.round(Math.random() * Number.MAX_SAFE_INTEGER);
@@ -167,8 +167,7 @@ class TransactionManager {
         Object.keys(txMeta).forEach(key => {this.tx[index][key] = txMeta[key]});
     };
 
-    async getTxMeta() {
-        const methodArgs = [].slice.call(arguments);
+    async getTxMeta(...methodArgs) {
         const obj = methodArgs.shift();
         const method = methodArgs.shift();
 
@@ -184,17 +183,17 @@ class TransactionManager {
 
         if(!obj._call.includes(method)) {
             txType = 'send';
-            options.gas = options.gas || obj.gasLimit || '6000000';
+            options.gas = options.gas || obj.gasLimit;
             options.gasPrice = options.gasPrice || obj.gasPrice;
-            const gasPrice = await obj.w3.eth.getGasPrice();
+            let blockGasPrice = parseInt(await obj.w3.eth.getGasPrice());
 
-            if(!options.gasPrice) options.gasPrice = Math.ceil(parseInt(gasPrice) * 1.2);
+            if(!options.gasPrice) options.gasPrice = Math.ceil(blockGasPrice * 1.2);
+            const { gasPrice } = options;
 
-            if(parseInt(gasPrice) > options.gasPrice) {
-                log.warn(`the gas price is too LOW: blockchain - ${fromWei(gasPrice, 'gwei')}, TxObject - ${fromWei(options.gasPrice, 'gwei')} (GWEI)`)
-            } else if(options.gasPrice > parseInt(gasPrice) * 10) {
-                log.warn(`the gas price is too HIGH: blockchain - ${fromWei(gasPrice, 'gwei')}, TxObject - ${fromWei(options.gasPrice, 'gwei')} (GWEI)`)
-            }
+            if(blockGasPrice > gasPrice || gasPrice > blockGasPrice * 10)
+                log.warn(`the gas price is too ${blockGasPrice > gasPrice ? "LOW" : "HIGH"}: `+
+                         `blockchain - ${fromWei(blockGasPrice, 'gwei')}, ` +
+                         `TxObject - ${fromWei(gasPrice, 'gwei')} (GWEI)`)
         }
 
         return new TransactionObject({
@@ -213,8 +212,7 @@ class TransactionManager {
         const releaseNonceLock = await this._getLock(address);
         try {
             const block = await w3.eth.getBlock('latest');
-            const blockNumber = block.number;
-            const nextNetworkNonce = await w3.eth.getTransactionCount(address, blockNumber);
+            const nextNetworkNonce = await w3.eth.getTransactionCount(address, block.number);
             const highestLocallyConfirmed = this._getHighestLocallyConfirmed(address);
 
             const highestSuggested = Math.max(nextNetworkNonce, highestLocallyConfirmed);
@@ -312,7 +310,7 @@ class TransactionManager {
                 pending: this.getPendingTransactions().length,
                 failed: this.getFailedTransactions().length,
                 confirmed: this.getConfirmedTransactions().length,
-                retries: this._retries,
+                retries: this.retries,
                 totalGasUsed: this.totalGasUsed.toString(),
                 totalEthSpent: this.totalEthSpent.toString()
             })
@@ -322,7 +320,6 @@ class TransactionManager {
         const weiSpent =  bn(gasUsed).multiply(bn(gasPrice)).toString();
         this.totalGasUsed = this.totalGasUsed.add(bn(gasUsed));
         this.totalEthSpent = this.totalEthSpent + parseFloat(fromWei(weiSpent, 'ether'));
-
     };
 
     async _calculateGasExpenses(obj, txMeta) {
@@ -353,17 +350,13 @@ class TransactionManager {
 
         status = `submitTx: ${status.toUpperCase()} - ${id}`;
 
-
-        if(!err) {
-            log.debug(status);
-        }
+        if(!err) log.debug(status);
         else {
             if(err.message && err.message.includes('Transaction ran out of gas')) {
                 const gasPrice = fromWei(txMeta.options.gasPrice, 'gwei');
                 log.warn(`${status} (${txHash}), the transaction has been reverted or the gasLimit is too low (${gasPrice} gwei)`);
-            } else {
-                log.error(`${status}, ${err}`);
             }
+            else log.error(`${status}, ${err}`);
         }
 
         this.updateTx(txMeta);
@@ -489,8 +482,7 @@ const proxyHandler = {
 
         if(isEvent) {
             const event = prop.split(/^on/)[1];
-            obj[prop] = function proxyAddEvent () {
-                const args = [].slice.call(arguments);
+            obj[prop] = function proxyAddEvent (...args) {
                 const callback = args[args.length - 1];
                 if(!callback || typeof callback !== 'function')
                     throw new Error('A callback must be a function!');
@@ -513,10 +505,9 @@ const proxyHandler = {
             return obj[prop];
         }
 
-        obj[prop] = function proxyAddProp () {
+        obj[prop] = function proxyAddProp (...args) {
             let path = 'contract.methods';
             const defer = PromiEvent();
-            const args = [].slice.call(arguments);
 
             const callback = typeof args[args.length - 1] === 'function' ? args[args.length - 1] : null;
             if(callback) args.pop();
@@ -747,88 +738,75 @@ class Interface {
     deploy(options, callback) {
         options = options || {};
 
-        const {from, gas, gasPrice, gasLimit, nonce, value} = options;
+        const {from, gas, gasPrice, gasLimit, nonce, value, args, bytecode} = options;
 
-        const args = [
-            {data: options.bytecode || this.bytecode, arguments: options.args || []},
+        const _args = [
+            {data: bytecode || this.bytecode, arguments: args || []},
             {from, gas, gasPrice, gasLimit, nonce, value}
         ];
 
-        if (callback) args.push(callback);
+        if (callback) _args.push(callback);
 
-        return this._deploy(...args);
+        return this._deploy(..._args);
     };
 
     async sendWithRetry (txMeta, retryOptions, defer) {
-        let err, result, nonce;
+        let err, result, counter = 0;
         retryOptions = retryOptions || {};
 
         const { methodArgs } = txMeta;
-
+        const { txManager } = this;
 
         let delay = retryOptions.delay || 10; //seconds
         let gasPrice = retryOptions.gasPrice || this.gasPrice || await this.getGasPrice(1.2); //block gasPrice + 20%
-        const verify = retryOptions.verify;
+        const verify = retryOptions.verify || function () {};
         const retry = retryOptions.retry || 3;
         const incBase = retryOptions.incBase || 1;
 
-        let counter = 0;
+        const updateNonce = (e, n) => e.includes('Transaction was not mined within') ? n : null;
+
+        const pre = (meta, counter) => `[try #${counter}] [txId ${meta.id}] [txHash ${meta.txHash}]`;
+
+        const updateTx = (meta, result, err, counter) => {
+            const {id, txHash, status} = meta;
+            if(status === 'confirmed') return [null, result];
+
+            log.debug(pre(meta, counter) + ` -> Tx Success${err ? ", VERIFIED" : ""}`);
+
+            meta.status = 'confirmed';
+            txManager.updateTx(meta);
+
+            log.debug(JSON.stringify({...txManager.getTxStat(`try #${counter} out`), txId: id, txHash }));
+            return [null, result]
+        };
+
+        const _verify = async (err, args) => err ? !!(await verify(...args)) : true;
+
+        const _sleep = (meta, counter, delay) => {
+            log.warn(pre(meta, counter) + ` - Tx Failed, next try in ${delay * (counter + 1)} seconds...`);
+            return sleep(delay * (counter + 1) * 1000);
+        };
 
         do {
-            let verified = false;
+            txMeta.options.gasPrice = Math.ceil(+gasPrice * incBase ** counter);
 
-            const updateTx = () => {
-                let msg = `${methodArgs.join(', ')} - ${txMeta.txHash} -> Tx Success`;
-                if(verified) msg += `, VERIFIED`;
-                log.debug(`[try #${counter}] [txId ${txMeta.id}] ` + msg);
-                if(txMeta.id) {
-                    txMeta.status = 'confirmed';
-                    this.txManager.updateTx(txMeta);
-                }
-                log.debug(JSON.stringify(extend(this.txManager.getTxStat(`try #${counter} out`), {txId: txMeta.id, txHash: txMeta.txHash})));
-            };
+            [err, result] = await txManager.submitTx(this, txMeta, defer);
+            delete txMeta.options.data;
 
-            // will be skipped on first call
-            if(err && verify) verified = await verify(...methodArgs);
-            if((!err || !!verified) && counter > 0) {
-                if(txMeta.status !== 'confirmed') updateTx();
-                return [null, result]
-            }
-            if(counter > 0) {
-                delete txMeta.options.data;
-                log.debug(`resubmit: ${txMeta.id} -> ${JSON.stringify(txMeta)}`);
-                this.txManager._retries += 1;
-            }
+            if(_verify(err, methodArgs)) return updateTx(txMeta, result, err, counter);
+            if(retry === counter) break;
 
-            // first attempt - send a transaction with a standard price, increase it on subsequent attempts
-            txMeta.options.gasPrice = Math.ceil(parseInt(gasPrice) * incBase ** counter);
-            txMeta.options.nonce = nonce;
+            await _sleep(txMeta, counter, delay);
+            if(_verify(err, methodArgs)) return updateTx(txMeta, result, err, counter);
 
-            [err, result] = await this.txManager.submitTx(this, txMeta, defer);
+            txMeta.options.nonce = updateNonce(err.message, txMeta.nonce);
 
-            if(err && verify) verified = await verify(...methodArgs);
-
-            if(!err || !!verified) {
-                if(txMeta.status !== 'confirmed') updateTx();
-                return [null, result]
-            }
-
-            // if transaction has failed because of timeout - replace it with highest gasPrice and the same nonce
-            if(err.message.includes('Transaction was not mined within'))
-                nonce = txMeta.nonce;
-            else nonce = null;
-
-
-            // skip waiting/logging if it was the last retry
-            if(counter < retry) {
-                log.warn(`[try #${counter}] [tx.id ${txMeta.id}] [txHash ${txMeta.txHash}] ${methodArgs.join(', ')} - Tx Failed, next try in ${delay * (counter + 1)} seconds...`);
-                await sleep(delay * (counter + 1) * 1000);
-            }
-
+            log.debug(`resubmit: ${txMeta.id} -> ${JSON.stringify(txMeta)}`);
+            txManager.retries++;
             counter++;
-
         } while (!(result !== undefined || counter > retry));
-        log.error(`[try #${counter - 1}] [tx.id ${txMeta.id}] [txHash ${txMeta.txHash}] ${methodArgs.join(', ')} - Tx Failed`);
+
+        log.error(pre(txMeta, counter) + ` - Tx Failed`);
         return [err, result]
     };
 }

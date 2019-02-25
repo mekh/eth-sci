@@ -1,6 +1,6 @@
 {
   "name": "eth-sci",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Ethereum Smart Contract Interface - a library for compiling, deploying, and interacting with the smart contracts",
   "homepage": "https://github.com/mekh/eth-sci",
   "main": "src/interface.js",
