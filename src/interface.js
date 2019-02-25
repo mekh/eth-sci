@@ -288,7 +288,6 @@ class TransactionManager {
             .on('error', e => {
                 defer.eventEmitter.emit('error', e);
                 this._checkError(e, options.from, txMeta);
-                err = e;
             }));
 
         if(!err && method === 'deploy' && path === 'contract')  obj.at(result.options.address);
@@ -556,8 +555,8 @@ class Web3 {
         else protocol = nodeAddress.split(':')[0];
 
         if (!supportedProtocols.includes(protocol))
-            throw `"${protocol}" protocol is not supported! ` +
-            `Supported protocols:\n${JSON.stringify(supportedProtocols)}`;
+            throw new Error(`"${protocol}" protocol is not supported! ` +
+            `Supported protocols:\n${JSON.stringify(supportedProtocols)}`);
 
         const providers = {
             https: Web3js.providers.HttpProvider,
@@ -793,18 +792,18 @@ class Interface {
             [err, result] = await txManager.submitTx(this, txMeta, defer);
             delete txMeta.options.data;
 
-            if(_verify(err, methodArgs)) return updateTx(txMeta, result, err, counter);
+            if(await _verify(err, methodArgs)) return updateTx(txMeta, result, err, counter);
             if(retry === counter) break;
 
             await _sleep(txMeta, counter, delay);
-            if(_verify(err, methodArgs)) return updateTx(txMeta, result, err, counter);
+            if(await _verify(err, methodArgs)) return updateTx(txMeta, result, err, counter);
 
             txMeta.options.nonce = updateNonce(err.message, txMeta.nonce);
 
             log.debug(`resubmit: ${txMeta.id} -> ${JSON.stringify(txMeta)}`);
             txManager.retries++;
             counter++;
-        } while (!(result !== undefined || counter > retry));
+        } while (counter <= retry);
 
         log.error(pre(txMeta, counter) + ` - Tx Failed`);
         return [err, result]
