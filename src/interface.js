@@ -104,17 +104,23 @@ class TransactionManager {
         TransactionManager._instance = this;
     }
 
-    addTx(args) {
-        args.time = args.time || (new Date()).getTime();
-        args.status = 'pending';
-        if(args.id) {
-            const txs = this.getFilteredTxList({id: args.id});
-            if(txs) this.updateTx(args)
-        } else {
-            args.id = this._createRandomId();
-            this.tx.push(args);
+    addTx(txMeta) {
+        delete txMeta.txHash;
+        delete txMeta.data;
+
+        const { id } = txMeta;
+
+        txMeta.time = txMeta.time || (new Date()).getTime();
+        txMeta.status = 'pending';
+
+        if(id) {
+            const txs = this.getFilteredTxList({ id });
+            if(txs) this.updateTx(txMeta);
+            return
         }
-        return args.id;
+
+        txMeta.id = this._createRandomId();
+        this.tx.push(txMeta);
     };
 
     getFailedTransactions(address) {
@@ -155,11 +161,10 @@ class TransactionManager {
 
     updateTx(txMeta) {
         txMeta.lastUpdate = (new Date()).getTime();
-        if(txMeta.time) txMeta.duration = (txMeta.lastUpdate - txMeta.time)/1000;
+        txMeta.duration = (txMeta.lastUpdate - txMeta.time)/1000;
         const index = this.tx.findIndex(tx => tx.id === txMeta.id);
-        log.debug(`updateTx[${index}]: ${txMeta.id} -> ${JSON.stringify(txMeta)}`);
+        log.debug(`updateTx[${index}]: ${JSON.stringify(txMeta)}`);
         Object.keys(txMeta).forEach(key => {this.tx[index][key] = txMeta[key]});
-
     };
 
     async getTxMeta() {
@@ -182,9 +187,10 @@ class TransactionManager {
             options.gas = options.gas || obj.gasLimit || '6000000';
             options.gasPrice = options.gasPrice || obj.gasPrice;
             const gasPrice = await obj.w3.eth.getGasPrice();
-            if(!options.gasPrice) {
-                options.gasPrice = Math.ceil(parseInt(gasPrice) * 1.2);
-            } else if(parseInt(gasPrice) > options.gasPrice) {
+
+            if(!options.gasPrice) options.gasPrice = Math.ceil(parseInt(gasPrice) * 1.2);
+
+            if(parseInt(gasPrice) > options.gasPrice) {
                 log.warn(`the gas price is too LOW: blockchain - ${fromWei(gasPrice, 'gwei')}, TxObject - ${fromWei(options.gasPrice, 'gwei')} (GWEI)`)
             } else if(options.gasPrice > parseInt(gasPrice) * 10) {
                 log.warn(`the gas price is too HIGH: blockchain - ${fromWei(gasPrice, 'gwei')}, TxObject - ${fromWei(options.gasPrice, 'gwei')} (GWEI)`)
@@ -194,8 +200,9 @@ class TransactionManager {
         return new TransactionObject({
             id: options.txId,
             from: options.from,
-            methodArgs,
+            to: obj.address,
             method,
+            methodArgs,
             options,
             txType
         });
@@ -233,7 +240,7 @@ class TransactionManager {
             };
 
             const nextNonce = Math.max(nextNetworkNonce, localNonceResult);
-            //assert(Number.isInteger(nextNonce), `nonce-tracker - nextNonce is not an integer - got: (${typeof nextNonce}) "${nextNonce}"`);
+
             return { nextNonce, nonceDetails, releaseNonceLock };
 
         } catch (err) {
@@ -244,61 +251,32 @@ class TransactionManager {
     };
 
     async submitTx(obj, txMeta, defer, path) {
-        let err, result;
         const exec = _.get(obj, path || 'contract.methods');
 
         const { method, methodArgs, options, txType } = txMeta;
-        if(txType === 'call') {
-            [err, result] = await _to(exec[method](...methodArgs).call(options));
-            return [err, result]
-        }
+
+        if(txType === 'call') return await _to(exec[method](...methodArgs).call(options));
+
         log.debug(JSON.stringify(this.getTxStat('submitTxIN')));
 
-        await this._globalLockFree();
+        this.addTx(txMeta);
 
-        // get existing or assign a new transaction id
-        txMeta.id = this.addTx(txMeta);
-        //delete transaction hash and data if exist
-        delete txMeta.txHash;
-        delete txMeta.data;
+        const { nextNonce, nonceDetails, releaseNonceLock } = await this.getNonce(options.from, obj.w3);
 
-        const sendFrom = options.from || obj.wallet;
-        let { nextNonce, nonceDetails, releaseNonceLock } = await this.getNonce(sendFrom, obj.w3);
+        await this._waitQueue();
 
-        let awaiting = this.getSubmittedTransactions().length;
-        let pending = this.getPendingTransactions().length;
+        options.nonce = options.nonce || nextNonce;
 
-        const awaitLimit = 100;
-        const awaitTime = 60; //seconds
-
-        if(awaiting >= awaitLimit) {
-            while(awaiting >= awaitLimit) {
-                log.debug(`Too many transactions are waiting to be mined: submitted - ${awaiting}, pending - ${pending}, sleeping ${awaitTime} seconds...`);
-                await sleep(awaitTime * 1000);
-                awaiting = this.getSubmittedTransactions().length;
-                pending = this.getPendingTransactions().length;
-            }
-        }
-
-        let gasUsed = 0;
-
-        txMeta.nonce = options.nonce || nextNonce;
+        txMeta.nonce = options.nonce;
         txMeta.status = 'submitted';
         this.updateTx(txMeta);
 
-        options.nonce =  txMeta.nonce;
         releaseNonceLock();
 
-        log.debug(JSON.stringify({
-            id: txMeta.id,
-            contractAddress: obj.address,
-            nonceDetails,
-            txMeta
-        }));
+        log.debug(JSON.stringify({ id: txMeta.id, nonceDetails }));
         log.debug(JSON.stringify(this.getTxStat(txMeta.id)));
 
-
-        [err, result] = await _to(exec[method](...methodArgs)
+        let [err, result] = await _to(exec[method](...methodArgs)
             .send(options)
             .on('transactionHash', hash => {
                 defer.eventEmitter.emit('transactionHash', hash);
@@ -311,49 +289,15 @@ class TransactionManager {
             })
             .on('error', e => {
                 defer.eventEmitter.emit('error', e);
-                this._checkError(e, sendFrom, txMeta);
+                this._checkError(e, options.from, txMeta);
                 err = e;
             }));
 
+        if(!err && method === 'deploy' && path === 'contract')  obj.at(result.options.address);
 
-        if(txMeta.txHash) {
-            const receipt = await obj.w3.eth.getTransactionReceipt(txMeta.txHash);
-            gasUsed = receipt ? receipt.gasUsed || 0 : 0;
-            if(receipt && receipt.blockNumber) txMeta.blockNumber = receipt.blockNumber;
-        }
+        await this._calculateGasExpenses(obj, txMeta);
 
-        const totalGasUsed = obj.totalGasUsed || 0;
-        obj.gasUsed = gasUsed;
-        obj.totalGasUsed = bn(totalGasUsed).add(bn(obj.gasUsed)).toString();
-
-        this.updateStat(obj.gasUsed, txMeta.options.gasPrice);
-
-        if(!err) {
-            log.debug(`submitTx: CONFIRMED - ${txMeta.id} `);
-            txMeta.status = 'confirmed';
-
-            if(method === 'deploy' && path === 'contract') obj.at(result.options.address);
-        }
-        else {
-            if(err.message && err.message.includes('Transaction ran out of gas')) {
-                const gasPrice = fromWei(txMeta.options.gasPrice, 'gwei');
-                log.warn(`submitTx: FAILED - ${txMeta.id} (${txMeta.txHash}), the transaction has been reverted or the gasLimit is too low (${gasPrice} gwei)`);
-            } else {
-                log.error(`submitTx: FAILED - ${txMeta.id}, ${err}`);
-            }
-            txMeta.status = 'failed';
-        }
-        txMeta.gasUsed = obj.gasUsed;
-        txMeta.totalGasUsed = obj.totalGasUsed;
-
-        this.updateTx(txMeta);
-
-        const message = JSON.stringify(extend(this.getTxStat('submitTxOUT'), {txId: txMeta.id, txHash: txMeta.txHash}));
-        if(err) {
-            log.warn(message);
-        } else {
-            log.debug(message);
-        }
+        this._finalizeTx(txMeta, err);
 
         return [err, result]
     };
@@ -380,6 +324,55 @@ class TransactionManager {
         this.totalEthSpent = this.totalEthSpent + parseFloat(fromWei(weiSpent, 'ether'));
 
     };
+
+    async _calculateGasExpenses(obj, txMeta) {
+        const { totalGasUsed } = obj;
+        let gasUsed = 0;
+
+        if(txMeta.txHash) {
+            const receipt = await obj.w3.eth.getTransactionReceipt(txMeta.txHash);
+            gasUsed = receipt ? receipt.gasUsed || 0 : 0;
+            if(receipt && receipt.blockNumber) txMeta.blockNumber = receipt.blockNumber;
+        }
+
+        obj.gasUsed = gasUsed;
+        obj.totalGasUsed = bn(totalGasUsed).add(bn(gasUsed)).toString();
+
+        txMeta.gasUsed = gasUsed;
+        txMeta.totalGasUsed = totalGasUsed;
+
+        this.updateStat(gasUsed, txMeta.options.gasPrice);
+    }
+
+    _finalizeTx(txMeta, err) {
+        const {id, txHash} = txMeta;
+
+        let status = err ? 'failed' : 'confirmed';
+
+        txMeta.status = status;
+
+        status = `submitTx: ${status.toUpperCase()} - ${id}`;
+
+
+        if(!err) {
+            log.debug(status);
+        }
+        else {
+            if(err.message && err.message.includes('Transaction ran out of gas')) {
+                const gasPrice = fromWei(txMeta.options.gasPrice, 'gwei');
+                log.warn(`${status} (${txHash}), the transaction has been reverted or the gasLimit is too low (${gasPrice} gwei)`);
+            } else {
+                log.error(`${status}, ${err}`);
+            }
+        }
+
+        this.updateTx(txMeta);
+
+        const stat = this.getTxStat('submitTxOUT');
+        const message = JSON.stringify({...stat, txId: id, txHash});
+
+        log[err ? 'warn' : 'debug'](message);
+    }
 
     _checkError (err, address, txMeta) {
         address = toChecksum(address);
@@ -445,20 +438,30 @@ class TransactionManager {
 
     _getHighestNonce (txList) {
         const nonces = txList.map(txMeta => txMeta.nonce);
-        const max = nonces.length ? nonces.reduce((a, b) => Math.max(a, b)) : null;
-        return max
+        return nonces.length ? nonces.reduce((a, b) => Math.max(a, b)) : null
     };
+
+    async _waitQueue() {
+        let awaiting = this.getSubmittedTransactions().length;
+        let pending = this.getPendingTransactions().length;
+
+        const awaitLimit = 100;
+        const awaitTime = 60; //seconds
+
+        if(awaiting >= awaitLimit) {
+            while(awaiting >= awaitLimit) {
+                log.debug(`Too many transactions are waiting to be mined: submitted ` +
+                          `- ${awaiting}, pending - ${pending}, sleeping ${awaitTime} seconds...`);
+                await sleep(awaitTime * 1000);
+                awaiting = this.getSubmittedTransactions().length;
+                pending = this.getPendingTransactions().length;
+            }
+        }
+    }
 
     async _getLock (address) {
         const mutex = this._lookupMutex(address);
         return mutex.acquire()
-    };
-
-    async _getGlobalLock () {
-        log.debug(`_getGlobalLock`);
-        const globalMutex = this._lookupMutex('global');
-        const releaseLock = await globalMutex.acquire();
-        return { releaseLock }
     };
 
     _lookupMutex (lockId) {
@@ -468,12 +471,6 @@ class TransactionManager {
             this._lockMap[lockId] = mutex
         }
         return mutex;
-    };
-
-    async _globalLockFree () {
-        const globalMutex = this._lookupMutex('global');
-        const releaseLock = await globalMutex.acquire();
-        releaseLock()
     };
 
     _createRandomId() {
@@ -668,6 +665,8 @@ class Interface {
         this._gasPrice = null;
         this.bytecode = bytecode;
         this.gasLimit = '6000000';
+        this.gasUsed = 0;
+        this.totalGasUsed = 0;
         this.accounts = this.w3.currentProvider.addresses;
         this.walletIndex = 0;
 

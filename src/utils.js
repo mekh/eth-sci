@@ -125,7 +125,7 @@ exports.epochToDateString = (timestamp) => {
 
 const fromWei = (amount, unit) => utils.fromWei(amount.toString(), unit);
 exports.toWei = (amount, unit) => utils.toWei(amount.toString(), unit);
-exports.toChecksum = address => utils.toChecksumAddress(address);
+exports.toChecksum = address => utils.toChecksumAddress(address.toLowerCase());
 exports.fromWei = fromWei;
 
 exports.isAddress = address => utils.isAddress(address.toLowerCase());

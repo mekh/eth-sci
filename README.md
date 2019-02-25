@@ -262,7 +262,7 @@ token.name().then(console.log); // VeChain Token
    console.log(token.accounts); // ['0xAbc..', '0xBcd...', '0xCde', ...., '0xfab']
    console.log(token.wallet); // '0xAbc..'
 
-   this.wallet = 2;
+   token.wallet = 2;
    console.log(token.wallet); // '0xCde'
    ```
 
