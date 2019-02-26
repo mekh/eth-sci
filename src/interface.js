@@ -22,7 +22,6 @@ const EventEmitter = require('events');
 const PromiEvent = require('web3-core-promievent');
 const Web3js = require('web3');
 const Mutex = require('await-semaphore').Mutex;
-const extend = require('xtend');
 const net = require('net');
 const bn = require('big-integer');
 const _ = require('lodash');
@@ -111,11 +110,10 @@ class TransactionManager {
         const { id } = txMeta;
 
         txMeta.time = txMeta.time || (new Date()).getTime();
-        txMeta.status = 'pending';
 
         if(id) {
             const txs = this.getFilteredTxList({ id });
-            if(txs) this.updateTx(txMeta);
+            if(txs) this.updateTx(txMeta, 'pending');
             return
         }
 
@@ -124,27 +122,20 @@ class TransactionManager {
     };
 
     getFailedTransactions(address) {
-        const filter = {status: 'failed'};
-        if(address) filter.from  = address;
-        return this.getFilteredTxList(filter)
+        return this._filterTxByStatus(address, 'failed')
     };
 
     getConfirmedTransactions(address) {
-        const filter = {status: 'confirmed'};
-        if(address) filter.from  = address;
-        return this.getFilteredTxList(filter)
+        return this._filterTxByStatus(address, 'confirmed')
     };
 
     getPendingTransactions(address) {
-        const filter = {status: 'pending'};
-        if(address) filter.from  = address;
-        return this.getFilteredTxList(filter)
+        return this._filterTxByStatus(address, 'pending')
+
     };
 
     getSubmittedTransactions(address) {
-        const filter = {status: 'submitted'};
-        if(address) filter.from  = address;
-        return this.getFilteredTxList(filter)
+        return this._filterTxByStatus(address, 'submitted')
     };
 
     getFilteredTxList(opts, initialList) {
@@ -159,7 +150,8 @@ class TransactionManager {
         return txList.filter(txMeta => txMeta[key] === value)
     };
 
-    updateTx(txMeta) {
+    updateTx(txMeta, status) {
+        txMeta.status = status;
         txMeta.lastUpdate = (new Date()).getTime();
         txMeta.duration = (txMeta.lastUpdate - txMeta.time)/1000;
         const index = this.tx.findIndex(tx => tx.id === txMeta.id);
@@ -176,7 +168,7 @@ class TransactionManager {
         const isObject = (lastArgType === 'function' || lastArgType === 'object' && !!lastArg) && !Array.isArray(lastArg);
 
         const options = isObject ? methodArgs.pop() : {};
-        if(!obj.accounts) await obj.init();
+        if(!obj.accounts || !obj.accounts.length) await obj.init();
 
         options.from = options.from || obj.wallet;
         let txType = 'call';
@@ -185,12 +177,12 @@ class TransactionManager {
             txType = 'send';
             options.gas = options.gas || obj.gasLimit;
             options.gasPrice = options.gasPrice || obj.gasPrice;
-            let blockGasPrice = parseInt(await obj.w3.eth.getGasPrice());
+            const blockGasPrice = await obj.getGasPrice();
 
             if(!options.gasPrice) options.gasPrice = Math.ceil(blockGasPrice * 1.2);
             const { gasPrice } = options;
 
-            if(blockGasPrice > gasPrice || gasPrice > blockGasPrice * 10)
+            if(gasPrice < blockGasPrice || gasPrice > blockGasPrice * 10)
                 log.warn(`the gas price is too ${blockGasPrice > gasPrice ? "LOW" : "HIGH"}: `+
                          `blockchain - ${fromWei(blockGasPrice, 'gwei')}, ` +
                          `TxObject - ${fromWei(gasPrice, 'gwei')} (GWEI)`)
@@ -266,8 +258,7 @@ class TransactionManager {
         options.nonce = options.nonce || nextNonce;
 
         txMeta.nonce = options.nonce;
-        txMeta.status = 'submitted';
-        this.updateTx(txMeta);
+        this.updateTx(txMeta, 'submitted');
 
         releaseNonceLock();
 
@@ -300,10 +291,9 @@ class TransactionManager {
     };
 
     getTxStat (id) {
-        let data = {};
-        if(id) data.id = id;
+        let data = id ? { id } : {};
 
-        return extend(
+        return Object.assign(
             data, {
                 submitted: this.getSubmittedTransactions().length,
                 pending: this.getPendingTransactions().length,
@@ -318,7 +308,7 @@ class TransactionManager {
     updateStat(gasUsed, gasPrice) {
         const weiSpent =  bn(gasUsed).multiply(bn(gasPrice)).toString();
         this.totalGasUsed = this.totalGasUsed.add(bn(gasUsed));
-        this.totalEthSpent = this.totalEthSpent + parseFloat(fromWei(weiSpent, 'ether'));
+        this.totalEthSpent = this.totalEthSpent + parseFloat(fromWei(weiSpent));
     };
 
     async _calculateGasExpenses(obj, txMeta) {
@@ -344,8 +334,7 @@ class TransactionManager {
         const {id, txHash} = txMeta;
 
         let status = err ? 'failed' : 'confirmed';
-
-        txMeta.status = status;
+        this.updateTx(txMeta, status);
 
         status = `submitTx: ${status.toUpperCase()} - ${id}`;
 
@@ -357,8 +346,6 @@ class TransactionManager {
             }
             else log.error(`${status}, ${err}`);
         }
-
-        this.updateTx(txMeta);
 
         const stat = this.getTxStat('submitTxOUT');
         const message = JSON.stringify({...stat, txId: id, txHash});
@@ -410,6 +397,12 @@ class TransactionManager {
         return res.join(', ');
     };
 
+    _filterTxByStatus(address, status) {
+        const filter = { status };
+        if(address) filter.from  = address;
+        return this.getFilteredTxList(filter)
+    }
+
     _getHighestLocallyConfirmed (address) {
         const confirmedTransactions = this.getConfirmedTransactions(address);
         const highest = this._getHighestNonce(confirmedTransactions);
@@ -420,9 +413,10 @@ class TransactionManager {
         if(address) address = toChecksum(address);
 
         const nonces = txList.map(txMeta => txMeta.nonce);
+        const inUse = this._nonceInUse[address];
 
         let highest = startPoint;
-        while (nonces.includes(highest) || (address && this._nonceInUse[address] && this._nonceInUse[address].includes(highest))) {
+        while (nonces.includes(highest) || (address && inUse && inUse.includes(highest))) {
             highest++
         }
         return highest
@@ -581,7 +575,7 @@ class Web3 {
 
         } else if (protocol.startsWith('ws')) {
             this.wsId = ++wsId;
-            this.web3 = new Web3js(new provider);
+            this.web3 = new Web3js(provider);
 
             let shouldLog = true;
             let isFailed = false;
@@ -657,7 +651,7 @@ class Interface {
         this.gasLimit = '6000000';
         this.gasUsed = 0;
         this.totalGasUsed = 0;
-        this.accounts = this.w3.currentProvider.addresses;
+        this.accounts = this.w3.currentProvider.addresses || [];
         this.walletIndex = 0;
 
         this._setProxyMethods();
@@ -680,10 +674,8 @@ class Interface {
     }
 
     get wallet() {
-        if (!this.accounts)
-        //throw "The wallet has not been initialized yet. Call the 'init' method before accessing to the accounts.";
-            return;
-        return toChecksum(this.accounts[this.walletIndex])
+        if (this.accounts && this.accounts.length)
+            return toChecksum(this.accounts[this.walletIndex])
     }
 
     set wallet(index) {
@@ -725,7 +717,7 @@ class Interface {
     }
 
     async init() {
-        if (!this.accounts) this.accounts = await this.w3.eth.getAccounts();
+        if (!this.accounts || !this.accounts.length) this.accounts = await this.w3.eth.getAccounts();
     }
 
     async getGasPrice(multiplier) {
@@ -767,13 +759,11 @@ class Interface {
         const pre = (meta, counter) => `[try #${counter}] [txId ${meta.id}] [txHash ${meta.txHash}]`;
 
         const updateTx = (meta, result, err, counter) => {
-            const {id, txHash, status} = meta;
+            const { id, txHash, status } = meta;
             if(status === 'confirmed') return [null, result];
 
             log.debug(pre(meta, counter) + ` -> Tx Success${err ? ", VERIFIED" : ""}`);
-
-            meta.status = 'confirmed';
-            txManager.updateTx(meta);
+            txManager.updateTx(meta, 'confirmed');
 
             log.debug(JSON.stringify({...txManager.getTxStat(`try #${counter} out`), txId: id, txHash }));
             return [null, result]
