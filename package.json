@@ -20,12 +20,13 @@
   ],
   "dependencies": {
     "await-semaphore": "^0.1.3",
-    "big-integer": "^1.6.32",
-    "solc": "^0.5.0",
-    "truffle-hdwallet-provider": "^1.0.2",
-    "web3": "1.0.0-beta.34",
+    "big-integer": "^1.6.42",
+    "lodash": "latest",
+    "solc": "^0.5.4",
+    "truffle-hdwallet-provider": "^1.0.5",
+    "web3": "1.0.0-beta.37",
     "web3-core-promievent": "1.0.0-beta.37",
-    "lodash": "latest"
+    "web3-utils": "^1.0.0-beta.47"
   },
   "repository": {
     "type": "git",
@@ -37,8 +38,8 @@
   "devDependencies": {
     "bip39": "^2.5.0",
     "ethereumjs-wallet": "^0.6.3",
-    "ganache-cli": "^6.1.6",
-    "mocha": "^5.2.0",
-    "nyc": "^13.1.0"
+    "ganache-cli": "^6.4.1",
+    "mocha": "^6.0.2",
+    "nyc": "^13.3.0"
   }
 }

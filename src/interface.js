@@ -25,6 +25,7 @@ const Mutex = require('await-semaphore').Mutex;
 const net = require('net');
 const bn = require('big-integer');
 const _ = require('lodash');
+const WsProvider = require('./wsProvider');
 const utils = require('./utils');
 const erc20 = require('./ERC20');
 const {
@@ -38,12 +39,11 @@ const {
 } = utils;
 
 EventEmitter.defaultMaxListeners = 5000;
-const emitter = new EventEmitter;
 
-const isDebug = process.env.LOG_LEVEL === 'debug';
 let log = new Proxy({}, {
     get: function (logger, logLevel) {
         return function(message) {
+            const isDebug = process.env.LOG_LEVEL === 'debug';
             if(!isDebug) return;
             message = `[${(new Date()).toISOString()}] [${logLevel}] ${message}`;
             console.log(message)
@@ -53,24 +53,28 @@ let log = new Proxy({}, {
 
 const setLogger = logger => log = logger;
 
-
 class Subscription {
-    constructor(subId) {
-        this.id = subId;
+    constructor(obj, event, ...args) {
         this.subscription = null;
         this.unsibscribed = false;
+        this.target = obj.events;
+        this.address = obj.address;
+        this.event = event;
+        this.args = args;
+        this.subscribe()
     }
 
-    unsubscribe (callback) {
-        this.subscription.unsubscribe(callback);
+    unsubscribe () {
+        if(!this.subscription) return;
+        this.subscription.unsubscribe();
         this.unsibscribed = true;
         this.subscription = null;
     }
 
-    subscribe (obj, event, args) {
+    subscribe () {
         if(this.unsibscribed) return;
-        this.subscription = obj.events[event](...args);
-        this.event = event;
+        this.subscription = this.target[this.event](...this.args);
+        log.debug(`[${this.address}]  -> subscribed to ${this.event}`);
     }
 }
 
@@ -247,8 +251,6 @@ class TransactionManager {
 
         if(txType === 'call') return await _to(exec[method](...methodArgs).call(options));
 
-        log.debug(JSON.stringify(this.getTxStat('submitTxIN')));
-
         this.addTx(txMeta);
 
         const { nextNonce, nonceDetails, releaseNonceLock } = await this.getNonce(options.from, obj.w3);
@@ -256,16 +258,14 @@ class TransactionManager {
         await this._waitQueue();
 
         options.nonce = options.nonce || nextNonce;
-
         txMeta.nonce = options.nonce;
         this.updateTx(txMeta, 'submitted');
 
         releaseNonceLock();
 
         log.debug(JSON.stringify({ id: txMeta.id, nonceDetails }));
-        log.debug(JSON.stringify(this.getTxStat(txMeta.id)));
 
-        let [err, result] = await _to(exec[method](...methodArgs)
+        const [err, result] = await _to(exec[method](...methodArgs)
             .send(options)
             .on('transactionHash', hash => {
                 defer.eventEmitter.emit('transactionHash', hash);
@@ -275,6 +275,7 @@ class TransactionManager {
             .on('receipt', receipt => {
                 defer.eventEmitter.emit('receipt', receipt);
                 txMeta.blockNumber = receipt.blockNumber;
+                this._calculateGasExpenses(obj, txMeta, receipt.gasUsed);
             })
             .on('error', e => {
                 defer.eventEmitter.emit('error', e);
@@ -282,8 +283,6 @@ class TransactionManager {
             }));
 
         if(!err && method === 'deploy' && path === 'contract')  obj.at(result.options.address);
-
-        await this._calculateGasExpenses(obj, txMeta);
 
         this._finalizeTx(txMeta, err);
 
@@ -311,21 +310,12 @@ class TransactionManager {
         this.totalEthSpent = this.totalEthSpent + parseFloat(fromWei(weiSpent));
     };
 
-    async _calculateGasExpenses(obj, txMeta) {
-        const { totalGasUsed } = obj;
-        let gasUsed = 0;
-
-        if(txMeta.txHash) {
-            const receipt = await obj.w3.eth.getTransactionReceipt(txMeta.txHash);
-            gasUsed = receipt ? receipt.gasUsed || 0 : 0;
-            if(receipt && receipt.blockNumber) txMeta.blockNumber = receipt.blockNumber;
-        }
-
+    _calculateGasExpenses(obj, txMeta, gasUsed = 0) {
         obj.gasUsed = gasUsed;
-        obj.totalGasUsed = bn(totalGasUsed).add(bn(gasUsed)).toString();
+        obj.totalGasUsed = bn(obj.totalGasUsed).add(bn(gasUsed)).toString();
 
         txMeta.gasUsed = gasUsed;
-        txMeta.totalGasUsed = totalGasUsed;
+        txMeta.totalGasUsed = obj.totalGasUsed;
 
         this.updateStat(gasUsed, txMeta.options.gasPrice);
     }
@@ -476,23 +466,10 @@ const proxyHandler = {
         if(isEvent) {
             const event = prop.split(/^on/)[1];
             obj[prop] = function proxyAddEvent (...args) {
+                let options = {};
                 const callback = args[args.length - 1];
-                if(!callback || typeof callback !== 'function')
-                    throw new Error('A callback must be a function!');
-                let subscription;
-
-                subscription = new Subscription(obj.w3.currentProvider.wsId);
-                subscription.subscribe(obj, event, args);
-                log.debug(`[${subscription.id}] [${obj.address}] -> subscribed to ${event}`);
-
-                emitter.on('restoreSubscription', async (wsId)  => {
-                    const webSocketId = subscription.id;
-                    if(!webSocketId || wsId !== webSocketId || subscription.unsibscribed) return;
-                    log.debug(`[${wsId}] [${obj.address}] Restoring the "${prop}" subscription...`);
-                    subscription.subscribe(obj, event, args);
-                });
-
-                return subscription;
+                if(_.isPlainObject(args[0])) options = args[0];
+                return obj._subscribe(options, event, callback);
             };
 
             return obj[prop];
@@ -536,8 +513,6 @@ const proxyHandler = {
     }
 };
 
-
-wsId = 0;
 class Web3 {
     constructor (nodeAddress, mnemonic) {
         if (!nodeAddress)
@@ -552,15 +527,21 @@ class Web3 {
             throw new Error(`"${protocol}" protocol is not supported! ` +
             `Supported protocols:\n${JSON.stringify(supportedProtocols)}`);
 
-        const providers = {
-            https: Web3js.providers.HttpProvider,
-            http: Web3js.providers.HttpProvider,
-            ipc: Web3js.providers.IpcProvider,
-            wss: Web3js.providers.WebsocketProvider,
-            ws: Web3js.providers.WebsocketProvider
-        };
+        let provider;
+        let emitter = new EventEmitter;
 
-        let provider = new providers[protocol](nodeAddress, protocol === 'ipc' ? net : null);
+        if(protocol === 'ipc') {
+            provider = new Web3js.providers.IpcProvider(nodeAddress, net);
+
+        } else if (protocol.startsWith('ws')) {
+            const _ws = new WsProvider(nodeAddress);
+            provider = _ws.provider;
+            provider.on('connect', () => log.info(`WebSocket - connected to "${nodeAddress}"`));
+            emitter = _ws.emitter;
+
+        } else {
+            provider = new Web3js.providers.HttpProvider(nodeAddress);
+        }
 
         if (mnemonic) {
             let addressesToUnlock = 20;
@@ -572,48 +553,11 @@ class Web3 {
 
             provider = new HDWalletProvider(mnemonic, provider, 0, addressesToUnlock);
             provider.engine.stop(); // stop block-polling
-
-        } else if (protocol.startsWith('ws')) {
-            this.wsId = ++wsId;
-            this.web3 = new Web3js(provider);
-
-            let shouldLog = true;
-            let isFailed = false;
-            const resetProvider = (provider) => {
-                isFailed = true;
-                this.isConnected = false;
-                if(this.isConnected) return;
-                provider.removeAllListeners();
-
-                if(shouldLog) {
-                    shouldLog = false;
-                    log.error(`[${this.wsId}] WebSocket - connection error "${nodeAddress}"`);
-                    setTimeout(() => shouldLog = true, 20 * 60 * 1000)
-                }
-                if(!this.isConnected) this.web3.setProvider(getProvider());
-            };
-
-            const getProvider = () => {
-                const provider = new providers[protocol](nodeAddress);
-                provider.on('error', () => resetProvider(provider));
-                provider.on('end', () => resetProvider(provider));
-                provider.on('connect', () => {
-                    log.info(`[${this.wsId}] WebSocket - connected to "${nodeAddress}"`);
-                    this.isConnected = true;
-                    if(isFailed === true)
-                        emitter.emit('resetProvider', this.wsId, provider);
-                    isFailed = false;
-                    shouldLog = true;
-                });
-                provider.wsId = this.wsId;
-
-                return provider
-            };
-            provider = getProvider();
         }
 
+        this.provider = provider;
+        this.emitter = emitter;
         this.web3 = new Web3js(provider);
-        return this.web3;
     }
 }
 
@@ -625,20 +569,18 @@ class Interface {
         } else {
             if (!nodeAddress)
                 throw "The node address is not defined!";
+
             this.protocol = nodeAddress.split(':')[0];
-            this.w3 = new Web3(nodeAddress, mnemonic);
+            const _web3 = new Web3(nodeAddress, mnemonic);
+            this.w3 = _web3.web3;
+            this.emitter = _web3.emitter;
+            this.emitter.on('resetProvider', provider => this._resetProvider(provider));
         }
 
         this.contract = new this.w3.eth.Contract(abi);
         this.methods = this.contract.methods;
         this.events = this.contract.events;
-
-        emitter.on('resetProvider', async (wsId, provider) => {
-            if(wsId !== this.w3.currentProvider.wsId) return;
-            this.contract._requestManager.provider = null; // get rid of 'connection not open on send()' error
-            this.contract.setProvider(provider);
-            emitter.emit('restoreSubscription', this.w3.currentProvider.wsId)
-        });
+        this.subscriptions = [];
 
         if(contractAddress) {
             this._address = toChecksum(contractAddress);
@@ -659,6 +601,24 @@ class Interface {
         this.txManager = new TransactionManager();
 
         return new Proxy(this, proxyHandler);
+    }
+
+    _resetProvider(provider) {
+        this.contract.setProvider(provider);
+        this.subscriptions.forEach(sub => {
+            if(!sub.unsibscribed)
+                log.debug(`[${this.address}] Restoring the "${sub.event}" subscription...`);
+            sub.subscribe()
+        });
+    }
+
+    _subscribe(options, event, callback) {
+        if(!callback || typeof callback !== 'function')
+            throw new Error('Callback must be a function!');
+
+        const subscription = new Subscription(this, event, options, callback);
+        this.subscriptions.push(subscription);
+        return subscription;
     }
 
     _setProxyMethods() {
@@ -686,7 +646,7 @@ class Interface {
         if(!price || Number(parseFloat(price)) !== price)
             this._gasPrice = null;
         else
-            this._gasPrice = toWei(price.toString(), 'gwei');
+            this._gasPrice = toWei(price, 'gwei');
     }
 
     get gasPrice() {

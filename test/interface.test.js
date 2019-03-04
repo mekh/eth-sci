@@ -291,7 +291,7 @@ describe ('INTERFACE LIBRARY (positive testing)', () => {
 
             assert.throws(
                 () => { mc[event]('123'); },
-                /.*callback must be a function!$/,
+                /.*Callback must be a function!$/,
 
             );
         });

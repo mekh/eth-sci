@@ -1,6 +1,6 @@
 'use strict';
 const solc = require('solc');
-const { utils } = require('web3');
+const utils = require('web3-utils');
 const bn = require('big-integer');
 
 exports.compile = async (source, callback) => {
