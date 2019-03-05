@@ -1,3 +1,4 @@
+'use strict';
 const Events = require('events');
 const Web3 = require('web3');
 
@@ -35,7 +36,7 @@ class WsProvider {
                 this.connecting = false;
                 this.setup(provider);
                 this.emitter.emit('resetProvider', this.provider);
-            })
+            });
         }, 500);
     }
 }

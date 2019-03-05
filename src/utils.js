@@ -2,91 +2,90 @@
 const solc = require('solc');
 const utils = require('web3-utils');
 const bn = require('big-integer');
+const _ = require('lodash');
 
 exports.compile = async (source, callback) => {
-    const input  = {
+    const input = {
         language: 'Solidity',
         sources: {
-            'contract': {
+            contract: {
                 content: source
             }
         },
         settings: {
             outputSelection: {
                 '*': {
-                    '*': [ '*' ]
+                    '*': ['*']
                 }
             }
         }
     };
 
     const compiled = await solc.compile(JSON.stringify(input));
-    const {errors, contracts} = JSON.parse(compiled);
-    if(errors && errors.length) {
-        return returnValue('\n' + errors.map(e => e.formattedMessage + '\n'), null, callback)
+    const { errors, contracts } = JSON.parse(compiled);
+    if (errors && errors.length > 0) {
+        return returnValue('\n' + errors.map(e => e.formattedMessage + '\n'), null, callback);
     }
 
     const result = {};
     for (let item in contracts.contract) {
         const path = contracts.contract[item];
         const bytecode = path['evm']['bytecode']['object'];
-        result[item] = {abi: path.abi, bytecode: "0x" + bytecode};
+        result[item] = { abi: path.abi, bytecode: '0x' + bytecode };
     }
 
     return returnValue(null, result, callback);
 };
 
-
 const returnValue = (err, result, defer, callback) => {
     const args = [err, result, defer, callback];
-    if (typeof args[args.length - 1] === 'function') {
+    if (_.isFunction(_.last(args))) {
         callback(err, result);
-    } else if(typeof args[args.length - 2] === 'function') {
+
+    } else if (_.isFunction(_.nth(args, -2))) {
         callback = defer;
         callback(err, result);
         defer = null;
     }
 
-    if(err && defer) {
-        if(callback || defer.eventEmitter.listeners('error').length) {
+    if (err && defer) {
+        if (callback || defer.listeners('error').length > 0) {
             // suppress uncaught error if an error listener is present
             // OR suppress uncaught error if a callback function is present
-            defer.eventEmitter.catch(function(){});
-            defer.eventEmitter.removeAllListeners();
+            defer.catch(function() {});
+            defer.removeAllListeners();
         }
-        setTimeout(function () {
+        setTimeout(() => {
             defer.reject(err);
-            } , 1
-        );
-        return defer.eventEmitter;
+        }, 1);
+
+        return defer;
     }
-    else if (err && typeof callback !== 'function' && (!defer || !defer.eventEmitter.listeners('error').length)) throw err;
-
+    else if (err && !_.isFunction(callback) && (!defer || defer.listeners('error').length === 0)) throw err;
     else if (defer) defer.resolve(result);
-
-    else return result
+    else return result;
 };
 
 exports.returnValue = returnValue;
 
-exports.FixedLengthArray = function (lengthLimit, unique=false) {
+exports.FixedLengthArray = function(lengthLimit, unique = false) {
     let array = [];
 
     array.has = function() {
         const args = [].slice.call(arguments);
-        return [].includes.apply(this, args)
+        return [].includes.apply(this, args);
     };
 
     array.add = function() {
         let args = [].slice.call(arguments);
-        args = Array.from(new Set(args.filter(item => !this.includes(item))));
+        args = [...new Set(args.filter(item => !this.includes(item)))];
         this._truncate(...args);
         return [].push.apply(this, args);
     };
 
-    array.push = function () {
+    array.push = function() {
         let args = [].slice.call(arguments);
-        if(unique) return this.add(...args);
+        if (unique) return this.add(...args);
 
         this._truncate(...args);
         return [].push.apply(this, args);
@@ -95,7 +94,7 @@ exports.FixedLengthArray = function (lengthLimit, unique=false) {
     array._truncate = function() {
         const args = [].slice.call(arguments);
         if (lengthLimit && this.length >= lengthLimit && args.length > 0) {
-            args.forEach(x => this.shift());
+            args.forEach(() => this.shift());
         }
 
         return this;
@@ -104,7 +103,7 @@ exports.FixedLengthArray = function (lengthLimit, unique=false) {
     return array;
 };
 
-exports.epochToDateString = (timestamp) => {
+exports.epochToDateString = timestamp => {
     const d = new Date();
     const date = new Date(timestamp * 1000 + d.getTimezoneOffset() * 60000);
     const year = date.getFullYear();
@@ -131,17 +130,13 @@ exports.fromWei = fromWei;
 exports.isAddress = address => utils.isAddress(address.toLowerCase());
 
 exports.toToken = (value, decimals) => {
-    if(decimals === 18) return fromWei(value.toString(), 'ether');
+    if (decimals === 18) return fromWei(value.toString(), 'ether');
 
     let tenToRemainingDecimalPlaces = bn(10).pow(18 - decimals);
     let asIf18 = bn(value).multiply(tenToRemainingDecimalPlaces).toString(10);
     return fromWei(asIf18, 'ether');
 };
 
-exports._to = function (promise) {
-    return promise
-        .then(data => [null, data])
-        .catch(err => [err, null]);
-};
+exports._to = promise => promise.then(data => [null, data]).catch(error => [error, null]);
 
 exports.sleep = ms => new Promise(resolve => setTimeout(resolve, ms));

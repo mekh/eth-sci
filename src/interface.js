@@ -1,3 +1,4 @@
+/* eslint-disable no-console */
 /**
  * Ethereum Smart Contract Interface - a NodeJS library for compiling, deploying, and interacting with the smart contracts
  * Copyright (C) 2019,  Alexandr V.Mekh
@@ -17,9 +18,10 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
+'use strict';
 const HDWalletProvider = require('truffle-hdwallet-provider');
 const EventEmitter = require('events');
-const PromiEvent = require('web3-core-promievent');
+const PromiEvent = require('web3-core-promievent').PromiEvent;
 const Web3js = require('web3');
 const Mutex = require('await-semaphore').Mutex;
 const net = require('net');
@@ -41,13 +43,14 @@ const {
 EventEmitter.defaultMaxListeners = 5000;
 
 let log = new Proxy({}, {
-    get: function (logger, logLevel) {
+    get: function(logger, logLevel) {
         return function(message) {
             const isDebug = process.env.LOG_LEVEL === 'debug';
-            if(!isDebug) return;
-            message = `[${(new Date()).toISOString()}] [${logLevel}] ${message}`;
-            console.log(message)
-        }
+            if (!isDebug) return;
+
+            message = `[${new Date().toISOString()}] [${logLevel}] ${message}`;
+            console.log(message);
+        };
     }
 });
 
@@ -61,42 +64,42 @@ class Subscription {
         this.address = obj.address;
         this.event = event;
         this.args = args;
-        this.subscribe()
+        this.subscribe();
     }
 
-    unsubscribe () {
-        if(!this.subscription) return;
+    unsubscribe() {
+        if (!this.subscription) return;
         this.subscription.unsubscribe();
         this.unsibscribed = true;
         this.subscription = null;
     }
 
-    subscribe () {
-        if(this.unsibscribed) return;
+    subscribe() {
+        if (this.unsibscribed) return;
         this.subscription = this.target[this.event](...this.args);
         log.debug(`[${this.address}]  -> subscribed to ${this.event}`);
     }
 }
 
-
 class TransactionObject {
-    constructor (txMeta) {
+    constructor(txMeta) {
         const { id } = txMeta;
-        if(id && TransactionObject._ids && TransactionObject._ids[id])
+        if (id && TransactionObject._ids && TransactionObject._ids[id])
             return TransactionObject._ids[id]; // don't create a new instance, return an existing one instead
 
-        if(!TransactionObject._ids) TransactionObject._ids = {};
-        Object.keys(txMeta).forEach(key => this[key] = txMeta[key]);
+        if (!TransactionObject._ids) TransactionObject._ids = {};
+        Object.keys(txMeta).forEach(key => (this[key] = txMeta[key]));
 
-        if(id) TransactionObject._ids[id] = this;
+        if (id) TransactionObject._ids[id] = this;
     }
 }
 
-
 class TransactionManager {
-    constructor(enforce=false) {
+    constructor(enforce = false) {
         //return a singleton by default
-        if (TransactionManager._instance && !enforce) return TransactionManager._instance;
+        if (TransactionManager._instance && !enforce)
+            return TransactionManager._instance;
+
         this.tx = [];
         this.totalGasUsed = bn.zero;
         this.totalEthSpent = 0;
@@ -113,83 +116,78 @@ class TransactionManager {
 
         const { id } = txMeta;
 
-        txMeta.time = txMeta.time || (new Date()).getTime();
+        txMeta.time = txMeta.time || new Date().getTime();
 
-        if(id) {
+        if (id) {
             const txs = this.getFilteredTxList({ id });
-            if(txs) this.updateTx(txMeta, 'pending');
-            return
+            if (txs) this.updateTx(txMeta, 'pending');
+            return;
         }
 
         txMeta.id = this._createRandomId();
         this.tx.push(txMeta);
-    };
+    }
 
     getFailedTransactions(address) {
-        return this._filterTxByStatus(address, 'failed')
-    };
+        return this._filterTxByStatus(address, 'failed');
+    }
 
     getConfirmedTransactions(address) {
-        return this._filterTxByStatus(address, 'confirmed')
-    };
+        return this._filterTxByStatus(address, 'confirmed');
+    }
 
     getPendingTransactions(address) {
-        return this._filterTxByStatus(address, 'pending')
-
-    };
+        return this._filterTxByStatus(address, 'pending');
+    }
 
     getSubmittedTransactions(address) {
-        return this._filterTxByStatus(address, 'submitted')
-    };
+        return this._filterTxByStatus(address, 'submitted');
+    }
 
     getFilteredTxList(opts, initialList) {
         let filteredTxList = initialList;
-        Object.keys(opts).forEach((key) => {
-            filteredTxList = this.getTxsByMetaData(key, opts[key], filteredTxList)
+        Object.keys(opts).forEach(key => {
+            filteredTxList = this.getTxsByMetaData(key, opts[key], filteredTxList);
         });
-        return filteredTxList
-    };
+        return filteredTxList;
+    }
 
     getTxsByMetaData(key, value, txList = this.tx) {
-        return txList.filter(txMeta => txMeta[key] === value)
-    };
+        return txList.filter(txMeta => txMeta[key] === value);
+    }
 
     updateTx(txMeta, status) {
         txMeta.status = status;
-        txMeta.lastUpdate = (new Date()).getTime();
-        txMeta.duration = (txMeta.lastUpdate - txMeta.time)/1000;
+        txMeta.lastUpdate = new Date().getTime();
+        txMeta.duration = (txMeta.lastUpdate - txMeta.time) / 1000;
         const index = this.tx.findIndex(tx => tx.id === txMeta.id);
         log.debug(`updateTx[${index}]: ${JSON.stringify(txMeta)}`);
-        Object.keys(txMeta).forEach(key => {this.tx[index][key] = txMeta[key]});
-    };
+        Object.keys(txMeta).forEach(key => (this.tx[index][key] = txMeta[key]));
+    }
 
-    async getTxMeta(...methodArgs) {
-        const obj = methodArgs.shift();
-        const method = methodArgs.shift();
+    async getTxMeta(...args) {
+        const obj = args.shift();
+        const method = args.shift();
 
-        const lastArg = methodArgs[methodArgs.length - 1];
-        const lastArgType = typeof lastArg;
-        const isObject = (lastArgType === 'function' || lastArgType === 'object' && !!lastArg) && !Array.isArray(lastArg);
-
-        const options = isObject ? methodArgs.pop() : {};
-        if(!obj.accounts || !obj.accounts.length) await obj.init();
+        const options = _.isPlainObject(_.last(args)) ? args.pop() : {};
+        if (!obj.accounts || obj.accounts.length === 0) await obj.init();
 
         options.from = options.from || obj.wallet;
         let txType = 'call';
 
-        if(!obj._call.includes(method)) {
+        if (!obj._call.includes(method)) {
             txType = 'send';
             options.gas = options.gas || obj.gasLimit;
             options.gasPrice = options.gasPrice || obj.gasPrice;
             const blockGasPrice = await obj.getGasPrice();
 
-            if(!options.gasPrice) options.gasPrice = Math.ceil(blockGasPrice * 1.2);
+            if (!options.gasPrice) options.gasPrice = Math.ceil(blockGasPrice * 1.2);
             const { gasPrice } = options;
 
             if(gasPrice < blockGasPrice || gasPrice > blockGasPrice * 10)
-                log.warn(`the gas price is too ${blockGasPrice > gasPrice ? "LOW" : "HIGH"}: `+
+                log.warn(`the gas price is too ${blockGasPrice > gasPrice ? 'LOW' : 'HIGH'}: `+
                          `blockchain - ${fromWei(blockGasPrice, 'gwei')}, ` +
-                         `TxObject - ${fromWei(gasPrice, 'gwei')} (GWEI)`)
+                         `TxObject - ${fromWei(gasPrice, 'gwei')} (GWEI)`);
         }
 
         return new TransactionObject({
@@ -197,11 +195,11 @@ class TransactionManager {
             from: options.from,
             to: obj.address,
             method,
-            methodArgs,
+            methodArgs: args,
             options,
             txType
         });
-    };
+    }
 
     async getNonce(address, w3) {
         address = toChecksum(address);
@@ -221,9 +219,9 @@ class TransactionManager {
                 highestSuggested,
                 address) || 0;
 
-            const highestPending = pendingTxs.length ?
-                pendingTxs.map(tx => tx.nonce).reduce((a, b) => Math.max(a, b)) :
-                0;
+            const highestPending = pendingTxs.length > 0
+                ? pendingTxs.map(tx => tx.nonce).reduce((a, b) => Math.max(a, b))
+                : 0;
 
             const nonceDetails = {
                 localNonceResult,
@@ -236,20 +234,20 @@ class TransactionManager {
             const nextNonce = Math.max(nextNetworkNonce, localNonceResult);
 
             return { nextNonce, nonceDetails, releaseNonceLock };
-
-        } catch (err) {
-            log.error(`getNonce error: ${err}`);
+        } catch (error) {
+            log.error(`getNonce error: ${error}`);
             releaseNonceLock();
-            throw err
+            throw new Error(error);
         }
-    };
+    }
 
     async submitTx(obj, txMeta, defer, path) {
         const exec = _.get(obj, path || 'contract.methods');
 
         const { method, methodArgs, options, txType } = txMeta;
 
-        if(txType === 'call') return await _to(exec[method](...methodArgs).call(options));
+        if (txType === 'call')
+            return await _to(exec[method](...methodArgs).call(options));
 
         this.addTx(txMeta);
 
@@ -265,50 +263,52 @@ class TransactionManager {
 
         log.debug(JSON.stringify({ id: txMeta.id, nonceDetails }));
 
-        const [err, result] = await _to(exec[method](...methodArgs)
-            .send(options)
-            .on('transactionHash', hash => {
-                defer.eventEmitter.emit('transactionHash', hash);
-                log.debug(`transactionHash: ${txMeta.id} -> ${hash}`);
-                txMeta.txHash = hash
-            })
-            .on('receipt', receipt => {
-                defer.eventEmitter.emit('receipt', receipt);
-                txMeta.blockNumber = receipt.blockNumber;
-                this._calculateGasExpenses(obj, txMeta, receipt.gasUsed);
-            })
-            .on('error', e => {
-                defer.eventEmitter.emit('error', e);
-                this._checkError(e, options.from, txMeta);
-            }));
+        const [err, result] = await _to(
+            exec[method](...methodArgs)
+                .send(options)
+                .on('transactionHash', hash => {
+                    defer.emit('transactionHash', hash);
+                    log.debug(`transactionHash: ${txMeta.id} -> ${hash}`);
+                    txMeta.txHash = hash;
+                })
+                .on('receipt', receipt => {
+                    defer.emit('receipt', receipt);
+                    txMeta.blockNumber = receipt.blockNumber;
+                    this._calculateGasExpenses(obj, txMeta, receipt.gasUsed);
+                })
+                .on('error', e => {
+                    defer.emit('error', e);
+                    this._checkError(e, options.from, txMeta);
+                })
+        );
 
-        if(!err && method === 'deploy' && path === 'contract')  obj.at(result.options.address);
+        if (!err && method === 'deploy' && path === 'contract')
+            obj.at(result.options.address);
 
         this._finalizeTx(txMeta, err);
 
-        return [err, result]
-    };
+        return [err, result];
+    }
 
-    getTxStat (id) {
+    getTxStat(id) {
         let data = id ? { id } : {};
 
-        return Object.assign(
-            data, {
-                submitted: this.getSubmittedTransactions().length,
-                pending: this.getPendingTransactions().length,
-                failed: this.getFailedTransactions().length,
-                confirmed: this.getConfirmedTransactions().length,
-                retries: this.retries,
-                totalGasUsed: this.totalGasUsed.toString(),
-                totalEthSpent: this.totalEthSpent.toString()
-            })
-    };
+        return Object.assign(data, {
+            submitted: this.getSubmittedTransactions().length,
+            pending: this.getPendingTransactions().length,
+            failed: this.getFailedTransactions().length,
+            confirmed: this.getConfirmedTransactions().length,
+            retries: this.retries,
+            totalGasUsed: this.totalGasUsed.toString(),
+            totalEthSpent: this.totalEthSpent.toString()
+        });
+    }
 
     updateStat(gasUsed, gasPrice) {
-        const weiSpent =  bn(gasUsed).multiply(bn(gasPrice)).toString();
+        const weiSpent = bn(gasUsed).multiply(bn(gasPrice)).toString();
         this.totalGasUsed = this.totalGasUsed.add(bn(gasUsed));
         this.totalEthSpent = this.totalEthSpent + parseFloat(fromWei(weiSpent));
-    };
+    }
 
     _calculateGasExpenses(obj, txMeta, gasUsed = 0) {
         obj.gasUsed = gasUsed;
@@ -321,54 +321,55 @@ class TransactionManager {
     }
 
     _finalizeTx(txMeta, err) {
-        const {id, txHash} = txMeta;
+        const { id, txHash } = txMeta;
 
         let status = err ? 'failed' : 'confirmed';
         this.updateTx(txMeta, status);
 
         status = `submitTx: ${status.toUpperCase()} - ${id}`;
 
-        if(!err) log.debug(status);
+        if (!err) log.debug(status);
         else {
-            if(err.message && err.message.includes('Transaction ran out of gas')) {
+            if (err.message && err.message.includes('Transaction ran out of gas')) {
                 const gasPrice = fromWei(txMeta.options.gasPrice, 'gwei');
-                log.warn(`${status} (${txHash}), the transaction has been reverted or the gasLimit is too low (${gasPrice} gwei)`);
-            }
-            else log.error(`${status}, ${err}`);
+                log.warn(
+                    `${status} (${txHash}), the transaction has been reverted or the gasLimit is too low (${gasPrice} gwei)`
+                );
+            } else log.error(`${status}, ${err}`);
         }
 
         const stat = this.getTxStat('submitTxOUT');
-        const message = JSON.stringify({...stat, txId: id, txHash});
+        const message = JSON.stringify({ ...stat, txId: id, txHash });
 
         log[err ? 'warn' : 'debug'](message);
     }
 
-    _checkError (err, address, txMeta) {
+    _checkError(err, address, txMeta) {
         address = toChecksum(address);
         const { message } = err;
         const { id, nonce } = txMeta;
         if (
             message.includes('nonce too low') ||
-            message.includes('Transaction was not mined within') ||
-            message.includes('known transaction') ||
-            message.includes('replacement transaction underpriced')
+      message.includes('Transaction was not mined within') ||
+      message.includes('known transaction') ||
+      message.includes('replacement transaction underpriced')
         ) {
-            if(!(address in this._nonceInUse)) {
+            if (!(address in this._nonceInUse)) {
                 this._nonceInUse[address] = new FixedLengthArray(200, true);
             }
             log.warn(`nonce in use: ${address}, ${id}, ${nonce} -> ${this._listToPeriods(this._nonceInUse[address])}`);
             this._nonceInUse[address].push(nonce);
         }
-    };
+    }
 
-    _listToPeriods (arr) {
-        arr.sort((a,b) => a-b);
+    _listToPeriods(arr) {
+        arr.sort((a, b) => a - b);
 
         let r = [[arr[0]]];
         let idx = 0;
-        for(let i=1; i<arr.length; i++) {
-            const isNext = arr[i] - arr[i-1] === 1;
-            if( isNext) continue;
+        for (let i = 1; i < arr.length; i++) {
+            const isNext = arr[i] - arr[i - 1] === 1;
+            if (isNext) continue;
 
             if (r[idx][0] !== arr[i - 1]) r[idx].push(arr[i - 1]);
             idx++;
@@ -376,46 +377,47 @@ class TransactionManager {
         }
 
         const rl = r.length;
-        if(r[rl - 1].length === 1 && arr.slice(-1)[0] !== r[rl - 1][0])
+        if (r[rl - 1].length === 1 && arr.slice(-1)[0] !== r[rl - 1][0])
             r[rl - 1].push(arr.slice(-1)[0]);
 
         let res = [];
-        r.forEach((item) => {
-            res.push(item.join(' - '))
+        r.forEach(item => {
+            res.push(item.join(' - '));
         });
 
         return res.join(', ');
-    };
+    }
 
     _filterTxByStatus(address, status) {
         const filter = { status };
-        if(address) filter.from  = address;
-        return this.getFilteredTxList(filter)
+        if (address) filter.from = address;
+        return this.getFilteredTxList(filter);
     }
 
-    _getHighestLocallyConfirmed (address) {
+    _getHighestLocallyConfirmed(address) {
         const confirmedTransactions = this.getConfirmedTransactions(address);
         const highest = this._getHighestNonce(confirmedTransactions);
-        return Number.isInteger(highest) ? highest + 1 : 0
-    };
+        return Number.isInteger(highest) ? highest + 1 : 0;
+    }
 
-    _getHighestContinuousFrom (txList, startPoint, address) {
-        if(address) address = toChecksum(address);
+    _getHighestContinuousFrom(txList, startPoint, address) {
+        if (address) address = toChecksum(address);
 
         const nonces = txList.map(txMeta => txMeta.nonce);
         const inUse = this._nonceInUse[address];
 
         let highest = startPoint;
         while (nonces.includes(highest) || (address && inUse && inUse.includes(highest))) {
-            highest++
+            highest++;
         }
-        return highest
-    };
 
-    _getHighestNonce (txList) {
+        return highest;
+    }
+
+    _getHighestNonce(txList) {
         const nonces = txList.map(txMeta => txMeta.nonce);
-        return nonces.length ? nonces.reduce((a, b) => Math.max(a, b)) : null
-    };
+        return nonces.length > 0 ? nonces.reduce((a, b) => Math.max(a, b)) : null;
+    }
 
     async _waitQueue() {
         let awaiting = this.getSubmittedTransactions().length;
@@ -424,9 +426,9 @@ class TransactionManager {
         const awaitLimit = 100;
         const awaitTime = 60; //seconds
 
-        if(awaiting >= awaitLimit) {
-            while(awaiting >= awaitLimit) {
-                log.debug(`Too many transactions are waiting to be mined: submitted ` +
+        if (awaiting >= awaitLimit) {
+            while (awaiting >= awaitLimit) {
+                log.debug('Too many transactions are waiting to be mined: submitted ' +
                           `- ${awaiting}, pending - ${pending}, sleeping ${awaitTime} seconds...`);
                 await sleep(awaitTime * 1000);
                 awaiting = this.getSubmittedTransactions().length;
@@ -435,88 +437,84 @@ class TransactionManager {
         }
     }
 
-    async _getLock (address) {
+    async _getLock(address) {
         const mutex = this._lookupMutex(address);
-        return mutex.acquire()
-    };
+        return mutex.acquire();
+    }
 
-    _lookupMutex (lockId) {
+    _lookupMutex(lockId) {
         let mutex = this._lockMap[lockId];
         if (!mutex) {
             mutex = new Mutex();
-            this._lockMap[lockId] = mutex
+            this._lockMap[lockId] = mutex;
         }
         return mutex;
-    };
+    }
 
     _createRandomId() {
         this._idCounter = this._idCounter % Number.MAX_SAFE_INTEGER;
-        return this._idCounter++
+        return this._idCounter++;
     }
 }
 
-
 const proxyHandler = {
-    get: function ptoxyGet (obj, prop) {
-        if(!obj.proxyMethods.includes(prop)) return obj[prop];
-        if(prop in obj) return obj[prop];
+    get: function ptoxyGet(obj, prop) {
+        if (!obj.proxyMethods.includes(prop)) return obj[prop];
+        if (prop in obj) return obj[prop];
 
         let isEvent = obj._events.includes(prop);
 
-        if(isEvent) {
+        if (isEvent) {
             const event = prop.split(/^on/)[1];
-            obj[prop] = function proxyAddEvent (...args) {
+            obj[prop] = function proxyAddEvent(...args) {
                 let options = {};
                 const callback = args[args.length - 1];
-                if(_.isPlainObject(args[0])) options = args[0];
+                if (_.isPlainObject(args[0])) options = args[0];
                 return obj._subscribe(options, event, callback);
             };
 
             return obj[prop];
         }
 
-        obj[prop] = function proxyAddProp (...args) {
+        obj[prop] = function proxyAddProp(...args) {
             let path = 'contract.methods';
-            const defer = PromiEvent();
+            const defer = new PromiEvent();
 
-            const callback = typeof args[args.length - 1] === 'function' ? args[args.length - 1] : null;
-            if(callback) args.pop();
+            const callback = _.isFunction(_.last(args)) ? args.pop() : null;
 
-            let retryOptions = args.filter(item => item.retryOptions)[0];
-            if(retryOptions) {
-                const idx = args.indexOf(retryOptions);
-                retryOptions = args.splice(idx, 1)[0].retryOptions;
-            }
+            let retryOptions;
+            let idx = args.findIndex(item => item.retryOptions);
 
-            if(prop === '_deploy') {
+            if (idx !== -1) retryOptions = args.splice(idx, 1)[0].retryOptions;
+
+            if (prop === '_deploy') {
                 path = 'contract';
-                prop = 'deploy'
+                prop = 'deploy';
             }
 
-            const send = (meta) => {
-                if(!retryOptions) {
+            const send = meta => {
+                if (!retryOptions) {
                     obj.txManager.submitTx(obj, meta, defer, path).then(([err, res]) => {
                         returnValue(err, res, defer, callback);
-                    })
+                    });
                 } else {
                     obj.sendWithRetry(meta, retryOptions, defer).then(([err, res]) => {
-                        returnValue(err, res, defer, callback)
-                    })
+                        returnValue(err, res, defer, callback);
+                    });
                 }
             };
 
             obj.txManager.getTxMeta(obj, prop, ...args).then(send);
-            return defer.eventEmitter;
+            return defer;
         };
 
-        return obj[prop]
+        return obj[prop];
     }
 };
 
 class Web3 {
-    constructor (nodeAddress, mnemonic) {
-        if (!nodeAddress)
-            throw "Error: the node address is not defined!";
+    constructor(nodeAddress, mnemonic) {
+        if (!nodeAddress) throw new Error('The node address is not defined!');
 
         const supportedProtocols = ['ws', 'wss', 'http', 'https', 'ipc'];
         let protocol;
@@ -528,17 +526,17 @@ class Web3 {
             `Supported protocols:\n${JSON.stringify(supportedProtocols)}`);
 
         let provider;
-        let emitter = new EventEmitter;
+        let emitter = new EventEmitter();
 
-        if(protocol === 'ipc') {
+        if (protocol === 'ipc') {
             provider = new Web3js.providers.IpcProvider(nodeAddress, net);
-
         } else if (protocol.startsWith('ws')) {
             const _ws = new WsProvider(nodeAddress);
             provider = _ws.provider;
-            provider.on('connect', () => log.info(`WebSocket - connected to "${nodeAddress}"`));
+            provider.on('connect', () => {
+                log.info(`WebSocket - connected to "${nodeAddress}"`);
+            });
             emitter = _ws.emitter;
-
         } else {
             provider = new Web3js.providers.HttpProvider(nodeAddress);
         }
@@ -546,8 +544,8 @@ class Web3 {
         if (mnemonic) {
             let addressesToUnlock = 20;
 
-            if (mnemonic.indexOf(" ") === -1 || Array.isArray(mnemonic)) {
-                const privateKeys = Array.isArray(mnemonic) ? mnemonic : [mnemonic];
+            if (mnemonic.indexOf(' ') === -1) {
+                const privateKeys = _.isArray(mnemonic) ? mnemonic : [mnemonic];
                 addressesToUnlock = privateKeys.length;
             }
 
@@ -561,14 +559,12 @@ class Web3 {
     }
 }
 
-
 class Interface {
-    constructor (nodeAddress, contractAddress, mnemonic, web3Instance, abi, bytecode) {
+    constructor(nodeAddress, contractAddress, mnemonic, web3Instance, abi, bytecode) {
         if (web3Instance) {
             this.w3 = web3Instance;
         } else {
-            if (!nodeAddress)
-                throw "The node address is not defined!";
+            if (!nodeAddress) throw new Error('The node address is not defined!');
 
             this.protocol = nodeAddress.split(':')[0];
             const _web3 = new Web3(nodeAddress, mnemonic);
@@ -582,7 +578,7 @@ class Interface {
         this.events = this.contract.events;
         this.subscriptions = [];
 
-        if(contractAddress) {
+        if (contractAddress) {
             this._address = toChecksum(contractAddress);
             this.at(this._address);
         }
@@ -606,14 +602,14 @@ class Interface {
     _resetProvider(provider) {
         this.contract.setProvider(provider);
         this.subscriptions.forEach(sub => {
-            if(!sub.unsibscribed)
+            if (!sub.unsibscribed)
                 log.debug(`[${this.address}] Restoring the "${sub.event}" subscription...`);
-            sub.subscribe()
+            sub.subscribe();
         });
     }
 
     _subscribe(options, event, callback) {
-        if(!callback || typeof callback !== 'function')
+        if (!callback || typeof callback !== 'function')
             throw new Error('Callback must be a function!');
 
         const subscription = new Subscription(this, event, options, callback);
@@ -629,13 +625,14 @@ class Interface {
         this.proxyMethods = this._sent.concat(['_deploy']).concat(this._call).concat(this._events);
     }
 
-    static web3 (web3Instance, contractAddress, abi, bytecode) {
-        return new Interface(null, contractAddress, null, web3Instance, abi, bytecode)
+    static web3(web3Instance, contractAddress, abi, bytecode) {
+        return new Interface(null, contractAddress, null, web3Instance, abi, bytecode);
     }
 
     get wallet() {
-        if (this.accounts && this.accounts.length)
-            return toChecksum(this.accounts[this.walletIndex])
+        if (this.accounts && this.accounts.length > 0)
+            return toChecksum(this.accounts[this.walletIndex]);
+        return null;
     }
 
     set wallet(index) {
@@ -643,10 +640,8 @@ class Interface {
     }
 
     set gasPrice(price) {
-        if(!price || Number(parseFloat(price)) !== price)
-            this._gasPrice = null;
-        else
-            this._gasPrice = toWei(price, 'gwei');
+        if (!price || Number(parseFloat(price)) !== price) this._gasPrice = null;
+        else this._gasPrice = toWei(price, 'gwei');
     }
 
     get gasPrice() {
@@ -658,7 +653,7 @@ class Interface {
     }
 
     set address(address) {
-        this.at(address)
+        this.at(address);
     }
 
     get abi() {
@@ -677,7 +672,8 @@ class Interface {
     }
 
     async init() {
-        if (!this.accounts || !this.accounts.length) this.accounts = await this.w3.eth.getAccounts();
+        if (!this.accounts || this.accounts.length === 0)
+            this.accounts = await this.w3.eth.getAccounts();
     }
 
     async getGasPrice(multiplier) {
@@ -692,41 +688,44 @@ class Interface {
         const {from, gas, gasPrice, gasLimit, nonce, value, args, bytecode} = options;
 
         const _args = [
-            {data: bytecode || this.bytecode, arguments: args || []},
-            {from, gas, gasPrice, gasLimit, nonce, value}
+            { data: bytecode || this.bytecode, arguments: args || [] },
+            { from, gas, gasPrice, gasLimit, nonce, value }
         ];
 
         if (callback) _args.push(callback);
 
         return this._deploy(..._args);
-    };
+    }
 
     async sendWithRetry (txMeta, retryOptions, defer) {
         let err, result, counter = 0;
+
         retryOptions = retryOptions || {};
 
         const { methodArgs } = txMeta;
         const { txManager } = this;
 
         let delay = retryOptions.delay || 10; //seconds
-        let gasPrice = retryOptions.gasPrice || this.gasPrice || await this.getGasPrice(1.2); //block gasPrice + 20%
-        const verify = retryOptions.verify || function () {};
+        let gasPrice = retryOptions.gasPrice || this.gasPrice || (await this.getGasPrice(1.2)); //block gasPrice + 20%
+        const verify = retryOptions.verify || function() {};
         const retry = retryOptions.retry || 3;
         const incBase = retryOptions.incBase || 1;
 
-        const updateNonce = (e, n) => e.includes('Transaction was not mined within') ? n : null;
+        const updateNonce = (e, n) =>
+            e.includes('Transaction was not mined within') ? n : null;
 
-        const pre = (meta, counter) => `[try #${counter}] [txId ${meta.id}] [txHash ${meta.txHash}]`;
+        const pre = (meta, counter) =>
+            `[try #${counter}] [txId ${meta.id}] [txHash ${meta.txHash}]`;
 
         const updateTx = (meta, result, err, counter) => {
             const { id, txHash, status } = meta;
-            if(status === 'confirmed') return [null, result];
+            if (status === 'confirmed') return [null, result];
 
-            log.debug(pre(meta, counter) + ` -> Tx Success${err ? ", VERIFIED" : ""}`);
+            log.debug(pre(meta, counter) + ` -> Tx Success${err ? ', VERIFIED' : ''}`);
             txManager.updateTx(meta, 'confirmed');
 
-            log.debug(JSON.stringify({...txManager.getTxStat(`try #${counter} out`), txId: id, txHash }));
-            return [null, result]
+            log.debug(JSON.stringify({...txManager.getTxStat(`try #${counter} out`), txId: id, txHash}));
+            return [null, result];
         };
 
         const _verify = async (err, args) => err ? !!(await verify(...args)) : true;
@@ -742,11 +741,14 @@ class Interface {
             [err, result] = await txManager.submitTx(this, txMeta, defer);
             delete txMeta.options.data;
 
-            if(await _verify(err, methodArgs)) return updateTx(txMeta, result, err, counter);
-            if(retry === counter) break;
+            if (await _verify(err, methodArgs))
+                return updateTx(txMeta, result, err, counter);
+
+            if (retry === counter) break;
 
             await _sleep(txMeta, counter, delay);
-            if(await _verify(err, methodArgs)) return updateTx(txMeta, result, err, counter);
+            if (await _verify(err, methodArgs))
+                return updateTx(txMeta, result, err, counter);
 
             txMeta.options.nonce = updateNonce(err.message, txMeta.nonce);
 
@@ -755,11 +757,10 @@ class Interface {
             counter++;
         } while (counter <= retry);
 
-        log.error(pre(txMeta, counter) + ` - Tx Failed`);
-        return [err, result]
-    };
+        log.error(pre(txMeta, counter) + ' - Tx Failed');
+        return [err, result];
+    }
 }
-
 
 class ERC20 extends Interface {
     constructor(nodeAddress, tokenAddress, mnemonic, web3Instance, abi, bytecode) {
@@ -767,7 +768,6 @@ class ERC20 extends Interface {
         super(nodeAddress, tokenAddress, mnemonic, web3Instance, abi, bytecode);
     }
 }
-
 
 module.exports = {
     Interface,

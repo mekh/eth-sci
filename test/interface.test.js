@@ -87,7 +87,7 @@ describe ('INTERFACE LIBRARY (positive testing)', () => {
 
         it('deploy', async () => {
             const testAI = await new testInterface(null, null, null, web3);
-            testAI.accounts = await web3.eth.getAccounts();
+            //testAI.accounts = await web3.eth.getAccounts();
             await testAI.deploy({bytecode: bytecode});
             contractAddress = testAI.address;
             assert.strictEqual(

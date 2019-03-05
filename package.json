@@ -1,6 +1,6 @@
 {
   "name": "eth-sci",
-  "version": "1.0.5",
+  "version": "1.0.7",
   "description": "Ethereum Smart Contract Interface - a library for compiling, deploying, and interacting with the smart contracts",
   "homepage": "https://github.com/mekh/eth-sci",
   "main": "src/interface.js",
@@ -25,7 +25,7 @@
     "solc": "^0.5.4",
     "truffle-hdwallet-provider": "^1.0.5",
     "web3": "1.0.0-beta.37",
-    "web3-core-promievent": "1.0.0-beta.37",
+    "web3-core-promievent": "1.0.0-beta.47",
     "web3-utils": "^1.0.0-beta.47"
   },
   "repository": {
@@ -37,6 +37,8 @@
   },
   "devDependencies": {
     "bip39": "^2.5.0",
+    "eslint": "^5.15.1",
+    "eslint-plugin-unicorn": "^7.1.0",
     "ethereumjs-wallet": "^0.6.3",
     "ganache-cli": "^6.4.1",
     "mocha": "^6.0.2",
