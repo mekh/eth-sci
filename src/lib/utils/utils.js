@@ -28,11 +28,11 @@ exports.compile = async (source, callback) => {
     }
 
     const result = {};
-    for (let item in contracts.contract) {
-        const path = contracts.contract[item];
+    Object.keys(contracts.contract).forEach(contract => {
+        const path = contracts.contract[contract];
         const bytecode = path['evm']['bytecode']['object'];
-        result[item] = { abi: path.abi, bytecode: '0x' + bytecode };
-    }
+        result[contract] = { abi: path.abi, bytecode: '0x' + bytecode };
+    });
 
     return returnValue(null, result, callback);
 };
@@ -61,7 +61,7 @@ const returnValue = (err, result, defer, callback) => {
 
         return defer;
     }
-    else if (err && !_.isFunction(callback) && (!defer || defer.listeners('error').length === 0)) throw err;
+    else if (err && !_.isFunction(callback) && (!defer || defer.listeners('error').length === 0)) throw new Error(err);
     else if (defer) defer.resolve(result);
     else return result;
 };
@@ -130,11 +130,11 @@ exports.fromWei = fromWei;
 exports.isAddress = address => utils.isAddress(address.toLowerCase());
 
 exports.toToken = (value, decimals) => {
-    if (decimals === 18) return fromWei(value.toString(), 'ether');
+    if (decimals === 18) return fromWei(value);
 
     let tenToRemainingDecimalPlaces = bn(10).pow(18 - decimals);
     let asIf18 = bn(value).multiply(tenToRemainingDecimalPlaces).toString(10);
-    return fromWei(asIf18, 'ether');
+    return fromWei(asIf18);
 };
 
 exports._to = promise => promise.then(data => [null, data]).catch(error => [error, null]);

@@ -163,7 +163,7 @@ const abi = require('./token-abi');
 const provider = new HDWalletProvider(mnemonic, nodeAddress);
 const web3 = new Web3(provider);
 
-const contract = new web3.eth.Contract(abi, contractAddress);
+const contract = new web3.eth.TestContractName(abi, contractAddress);
 
 contract.methods.balanceOf(testWallet)
     .call()

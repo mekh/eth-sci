@@ -3,7 +3,7 @@ const fs = require('fs');
 const assert = require('assert');
 const ganache = require('ganache-cli');
 const Web3 = require('web3');
-const {utils, Interface} = require('../src/interface');
+const { utils, Interface } = require('../src/index');
 const web3 = new Web3(ganache.provider());
 
 const tokenContract = './test/token.sol';
@@ -18,7 +18,7 @@ const getCompiled = async () => {
     return compiled.Token;
 };
 
-before(async () => {
+beforeAll(async () => {
     accounts = await web3.eth.getAccounts();
     const compiled = await getCompiled();
     const contractArguments = ["ERC20 token", "ERC20", 18, "10000000000000000000000000"];
@@ -26,7 +26,7 @@ before(async () => {
 
     token = Interface.web3(web3, null, compiled.abi, compiled.bytecode);
     await token.deploy(options);
-});
+}, 20000);
 
 describe ('ERC20', () => {
     it('deploys a contract', () => {

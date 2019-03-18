@@ -2,8 +2,9 @@
 const assert = require('assert');
 const ganache = require('ganache-cli');
 const Web3 = require('web3');
-const testInterface = require('../src/interface').ERC20;
-const erc20Abi = require('../src/ERC20');
+const testInterface = require('../src/index').ERC20;
+const erc20Abi = require('../src/resources/ERC20/ERC20');
+const utils = require('../src/lib/utils');
 
 
 const web3 = new Web3(ganache.provider());
@@ -16,14 +17,14 @@ let contractAddress, accounts;
 const randEthAddresses = (n) => {
     if (n <= 0)  return '';
     let addresses = [];
-    for (let i = 0; i < n; i++) addresses.push(Web3.utils.randomHex(20));
-    addresses = addresses.map(Web3.utils.toChecksumAddress);
+    for (let i = 0; i < n; i++) addresses.push(web3.utils.randomHex(20));
+    addresses = addresses.map(utils.toChecksum);
     if (n === 1) return addresses[0];
     return addresses;
 };
 
 describe ('INTERFACE LIBRARY (positive testing)', () => {
-    describe('ContractInterface', async () => {
+    describe('ContractInterface', () => {
 
         it('initialization should return an error if parameters not defined', () => {
            assert.throws(
@@ -91,7 +92,7 @@ describe ('INTERFACE LIBRARY (positive testing)', () => {
             await testAI.deploy({bytecode: bytecode});
             contractAddress = testAI.address;
             assert.strictEqual(
-                Web3.utils.isAddress(contractAddress),
+                utils.isAddress(contractAddress),
                 true
             );
         });
@@ -133,7 +134,7 @@ describe ('INTERFACE LIBRARY (positive testing)', () => {
             );
             assert.strictEqual(
                 testAI.contract.options.address,
-                Web3.utils.toChecksumAddress(newAddress)
+                utils.toChecksum(newAddress)
             )
 
         });
@@ -166,7 +167,7 @@ describe ('INTERFACE LIBRARY (positive testing)', () => {
             testAI.gasPrice = price;
             assert.strictEqual(
                 testAI._gasPrice,
-                Web3.utils.toWei(price.toString(), 'gwei')
+                utils.toWei(price, 'gwei')
             )
         });
 
