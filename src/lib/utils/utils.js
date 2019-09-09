@@ -1,10 +1,17 @@
 'use strict';
-const solc = require('solc');
+let solc = require('solc');
 const utils = require('web3-utils');
 const bn = require('big-integer');
 const _ = require('lodash');
 
-exports.compile = async (source, callback) => {
+const callbackPromisify = (func, instance, ...args) => {
+    return new Promise((resolve, reject) => {
+        func.apply(instance, [...args, (err, result) => {
+            err ? reject(err) : resolve(result)
+        }])
+    })
+}
+exports.compile = async (source, specifiedVersion, callback) => {
     const input = {
         language: 'Solidity',
         sources: {
@@ -20,7 +27,9 @@ exports.compile = async (source, callback) => {
             }
         }
     };
-
+    if (specifiedVersion) {
+        solc = await callbackPromisify(solc.loadRemoteVersion, solc, specifiedVersion)
+    }
     const compiled = await solc.compile(JSON.stringify(input));
     const { errors, contracts } = JSON.parse(compiled);
     if (errors && errors.length > 0) {
