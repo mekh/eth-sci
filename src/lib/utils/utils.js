@@ -3,6 +3,7 @@ let solc = require('solc');
 const utils = require('web3-utils');
 const bn = require('big-integer');
 const _ = require('lodash');
+const { compose, filter, get } = require('lodash/fp');
 
 const callbackPromisify = (func, instance, ...args) => {
     return new Promise((resolve, reject) => {
@@ -11,7 +12,7 @@ const callbackPromisify = (func, instance, ...args) => {
         }])
     })
 }
-exports.compile = async (source, specifiedVersion, callback) => {
+exports.compile = async (source, { specifiedVersion, ignoreWarning = false }, callback) => {
     const input = {
         language: 'Solidity',
         sources: {
@@ -32,7 +33,9 @@ exports.compile = async (source, specifiedVersion, callback) => {
     }
     const compiled = await solc.compile(JSON.stringify(input));
     const { errors, contracts } = JSON.parse(compiled);
-    if (errors && errors.length > 0) {
+    const getWarningLen = compose(get('length'), filter(['type', 'Warning']))
+    const isWarningIgnored = !(ignoreWarning && getWarningLen(errors))
+    if (isWarningIgnored && errors && errors.length > 0) {
         return returnValue('\n' + errors.map(e => e.formattedMessage + '\n'), null, callback);
     }
 
